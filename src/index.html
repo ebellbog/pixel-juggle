@@ -6,7 +6,16 @@
 </head>
 
 <body>
-    <div id="app">Hello World!</div>
+    <div id="app">
+        <header id="controls">
+            <label for="siteswap-input">Siteswap</label>
+            <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
+                autocorrect="off" spellcheck="false" placeholder="e.g. 531" value="3">
+            <button id="juggle-button" disabled>Juggle!</button>
+            <div id="validation-message"></div>
+        </header>
+        <canvas id="juggle-canvas"></canvas>
+    </div>
 </body>
 
 </html>

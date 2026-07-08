@@ -1,5 +1,6 @@
 import './index.less';
+import App from './App.js';
 
 $(document).ready(() => {
-    console.log('App ready!');
+    new App();
 });

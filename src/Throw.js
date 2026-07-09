@@ -125,11 +125,24 @@ export default class Throw {
         const p0x = this.catchX, p0y = this.baseY;
         const p3x = this.releaseX, p3y = this.releaseY;
         const d = this.carryDuration / 3;
-        const p1x = p0x + this.incomingVelocity.x * d;
-        const p1y = p0y + this.incomingVelocity.y * d;
+        let p1x = p0x + this.incomingVelocity.x * d;
+        let p1y = p0y + this.incomingVelocity.y * d;
         const launch = this.launchVelocity;
         const p2x = p3x - launch.x * d;
         const p2y = p3y - launch.y * d;
+
+        // Quick flat throws (e.g. a "1"): the catch-side and release-side
+        // control points can end up far apart vertically, pinching a visible
+        // kink at release even though velocity there is continuous - the
+        // carry's end curvature just doesn't match the flight's. Easing p1
+        // toward the release-side control softens that join; B'(1) is
+        // unchanged, so the release tangent still matches launchVelocity.
+        const flatness = 1 - Math.min(1, this.arcPeak / Math.max(this.carryLift, 1e-6));
+        if (flatness > 0) {
+            const pull = flatness * 0.58;
+            p1x += (p2x - p1x) * pull;
+            p1y += (p2y - p1y) * pull;
+        }
 
         const q = 1 - p;
         const w0 = q * q * q;

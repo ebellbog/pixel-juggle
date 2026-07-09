@@ -2,10 +2,16 @@ import Siteswap from './Siteswap.js';
 import SyncSiteswap from './SyncSiteswap.js';
 import JugglingSimulator from './JugglingSimulator.js';
 import Renderer from './Renderer.js';
+import Game from './Game.js';
 
 const DEFAULT_BPM = 100;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 
+/**
+ * Owns the page's idle-state chrome - siteswap input/validation, the action
+ * buttons, and the BPM slider - plus the "Show me" demo. Everything that
+ * happens after "Let me try!" is instead Game's job (see there).
+ */
 export default class App {
     constructor() {
         this.$input = $('#siteswap-input');
@@ -23,15 +29,8 @@ export default class App {
         this.siteswap = null;
         // Only set while the "Show me" demo animation is actually running.
         this.simulator = null;
-        // Static geometry for "Let me try!" preview mode - recomputed once
-        // per startPreview() call, then just redrawn as-is (e.g. on resize),
-        // aside from which beat is currently highlighted (see previewTick).
-        this.previewPaths = null;
-        this.previewExtent = null;
-        this.previewBallRadius = null;
-        this.previewPeriod = null;
-        this.previewBeatIndex = 0;
-        this.previewBeatElapsed = 0;
+        // Only set while "Let me try!" gameplay mode is active.
+        this.game = null;
         this.rafId = null;
         this.lastTimestamp = 0;
         this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
@@ -50,7 +49,7 @@ export default class App {
             }
         });
         this.$showMeButton.on('click', () => this.startDemo());
-        this.$tryButton.on('click', () => this.startPreview());
+        this.$tryButton.on('click', () => this.startGame());
         this.$stopButton.on('click', () => this.stop());
         this.$bpmSlider.on('input', () => this.setBpm(Number(this.$bpmSlider.val())));
         $(window).on('resize', () => this.handleResize());
@@ -59,11 +58,14 @@ export default class App {
     setBpm(bpm) {
         this.bpm = bpm;
         this.$bpmValue.text(bpm);
-        // Live speed change: an already-running demo keeps going, just
+        // Live speed change: an already-running demo/game keeps going, just
         // faster or slower from here, rather than restarting from scratch.
         if (this.simulator) {
             this.simulator.setBpm(bpm);
             this.renderer.fit(this.simulator.getExtent());
+        }
+        if (this.game) {
+            this.game.setBpm(bpm);
         }
     }
 
@@ -72,16 +74,15 @@ export default class App {
         if (this.simulator) {
             this.renderer.fit(this.simulator.getExtent());
             this.renderer.draw(this.simulator.getRenderState());
-        } else if (this.previewPaths) {
-            this.renderer.fit(this.previewExtent);
-            this.drawPreview();
+        } else if (this.game) {
+            this.game.handleResize();
         } else {
             this.renderer.draw({ balls: [] });
         }
     }
 
     validate() {
-        // Editing the pattern always stops any running demo/preview; the
+        // Editing the pattern always stops any running demo/game; the
         // player must choose an action again to watch (or practice) the
         // (possibly new) pattern.
         this.stop();
@@ -143,78 +144,20 @@ export default class App {
         this.rafId = requestAnimationFrame((ts) => this.tick(ts));
     }
 
-    /**
-     * "Let me try!" - the first step into gameplay mode. Not interactive
-     * yet: for now this just shows the beat metronome plus a static "ghost"
-     * of every throw the pattern should make, so the player has a fixed
-     * reference to practice against before we wire up real input.
-     */
-    startPreview() {
+    /** "Let me try!" - hands off to Game for everything from here on. */
+    startGame() {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
 
-        // A throwaway simulator purely to compute static geometry - it's
-        // never ticked with update(), so none of its time/tempo behavior
-        // comes into play, only the pattern's fixed shape (see
-        // JugglingSimulator.getGhostPaths).
-        const ghost = new JugglingSimulator(this.siteswap, { bpm: this.bpm });
-        this.previewPaths = ghost.getGhostPaths();
-        this.previewExtent = ghost.getExtent();
-        this.previewBallRadius = ghost.ballRadius;
-        this.previewPeriod = ghost.period;
-        this.previewBeatIndex = 0;
-        this.previewBeatElapsed = 0;
-
-        this.renderer.fit(this.previewExtent);
-        this.drawPreview();
+        this.game = new Game(this.siteswap, {
+            bpm: this.bpm,
+            renderer: this.renderer,
+            $beatBar: this.$beatBar,
+            $beatBarWrap: this.$beatBarWrap,
+        });
+        this.game.start();
 
         this.showStopButton();
-        this.startBeatBar();
-
-        this.lastTimestamp = performance.now();
-        this.rafId = requestAnimationFrame((ts) => this.previewTick(ts));
-    }
-
-    /**
-     * Experimental practice cue: advances which ghost path is drawn
-     * highlighted in step with the beat bar, so "the throw due this beat"
-     * reads as brighter white against the rest, faded gray. Only the
-     * highlight index changes here - the paths themselves are the same
-     * fixed geometry computed once in startPreview().
-     */
-    previewTick(timestamp) {
-        const dt = Math.min((timestamp - this.lastTimestamp) / 1000, MAX_FRAME_DT);
-        this.lastTimestamp = timestamp;
-
-        const beatDuration = 60 / this.bpm;
-        this.previewBeatElapsed += dt;
-        while (this.previewBeatElapsed >= beatDuration) {
-            this.previewBeatElapsed -= beatDuration;
-            this.previewBeatIndex = (this.previewBeatIndex + 1) % this.previewPeriod;
-        }
-        this.drawPreview();
-
-        this.rafId = requestAnimationFrame((ts) => this.previewTick(ts));
-    }
-
-    drawPreview() {
-        const beatDuration = 60 / this.bpm;
-        const beatProgress = Math.min(this.previewBeatElapsed / beatDuration, 1);
-        this.$beatBar.css('transform', `scaleX(${1 - beatProgress})`);
-
-        this.renderer.draw({
-            balls: [],
-            staticPaths: this.previewPaths.map((path) => ({
-                points: path.points,
-                highlighted: path.beat === this.previewBeatIndex,
-            })),
-            ballRadius: this.previewBallRadius,
-        });
-    }
-
-    startBeatBar() {
-        this.$beatBar.css('transform', 'scaleX(1)');
-        this.$beatBarWrap.removeClass('hidden');
     }
 
     stop() {
@@ -223,11 +166,10 @@ export default class App {
             this.rafId = null;
         }
         this.simulator = null;
-        this.previewPaths = null;
-        this.previewExtent = null;
-        this.previewBallRadius = null;
-        this.previewPeriod = null;
-        this.$beatBarWrap.addClass('hidden');
+        if (this.game) {
+            this.game.stop();
+            this.game = null;
+        }
         this.renderer.draw({ balls: [] });
         this.showActionButtons();
     }

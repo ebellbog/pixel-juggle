@@ -124,11 +124,10 @@ body {
 }
 
 // The metronome for "Let me try!" gameplay mode - jumps to full width at the
-// start of each beat, then shrinks to nothing by the next one. Toggling
-// .hidden on the wrap (rather than pausing/resuming) is also what resets the
-// animation to its start each time preview mode begins, since a display:none
-// element's animation drops back to its 0% keyframe and restarts the next
-// time it's shown.
+// start of each beat, then shrinks to nothing by the next one. Its scale is
+// driven directly from the same JS beat clock as the ghost-path highlight
+// (see App.drawPreview), not a CSS animation, so dragging the BPM slider
+// can't leave the bar and the path cue on different clocks.
 #beat-bar-wrap {
     position: absolute;
     left: 50%;
@@ -147,19 +146,6 @@ body {
     background: linear-gradient(to right, transparent, white 20%, white 80%, transparent);
     border-radius: 4px;
     transform-origin: center;
-    animation-name: beat-pulse;
-    animation-timing-function: linear;
-    animation-iteration-count: infinite;
-}
-
-@keyframes beat-pulse {
-    0% {
-        transform: scaleX(1);
-    }
-
-    100% {
-        transform: scaleX(0);
-    }
 }
 
 #juggle-canvas {

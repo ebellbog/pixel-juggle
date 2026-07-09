@@ -65,9 +65,6 @@ export default class App {
             this.simulator.setBpm(bpm);
             this.renderer.fit(this.simulator.getExtent());
         }
-        if (this.previewPaths) {
-            this.updateBeatBarTempo();
-        }
     }
 
     handleResize() {
@@ -201,6 +198,10 @@ export default class App {
     }
 
     drawPreview() {
+        const beatDuration = 60 / this.bpm;
+        const beatProgress = Math.min(this.previewBeatElapsed / beatDuration, 1);
+        this.$beatBar.css('transform', `scaleX(${1 - beatProgress})`);
+
         this.renderer.draw({
             balls: [],
             staticPaths: this.previewPaths.map((path) => ({
@@ -212,15 +213,8 @@ export default class App {
     }
 
     startBeatBar() {
-        this.updateBeatBarTempo();
-        // Un-hiding is also what restarts the animation from its beginning:
-        // a display:none element's CSS animation resets to its 0% keyframe,
-        // and stop() always hides this before any new start (see there).
+        this.$beatBar.css('transform', 'scaleX(1)');
         this.$beatBarWrap.removeClass('hidden');
-    }
-
-    updateBeatBarTempo() {
-        this.$beatBar.css('animation-duration', `${60 / this.bpm}s`);
     }
 
     stop() {

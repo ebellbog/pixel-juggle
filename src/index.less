@@ -106,9 +106,69 @@ body {
     }
 }
 
-#juggle-canvas {
+#canvas-area {
+    position: relative;
     flex: 1;
+    min-height: 0;
+}
+
+#juggle-canvas {
     display: block;
     width: 100%;
-    min-height: 0;
+    height: 100%;
+}
+
+@bpm-slider-length: 260px;
+
+#bpm-control {
+    position: absolute;
+    top: 50%;
+    right: 20px;
+    transform: translateY(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+
+    label {
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+        font-size: 12px;
+        color: fade(@text, 70%);
+    }
+}
+
+#bpm-slider-wrap {
+    // A native vertical range input renders inconsistently across browsers
+    // (and can silently ignore percentage heights), so instead this rotates
+    // an ordinary horizontal slider - which needs its wrap's width/height
+    // swapped from the visual footprint since the rotation happens in place.
+    width: 32px;
+    height: @bpm-slider-length;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#bpm-slider {
+    width: @bpm-slider-length;
+    // Without this, the wrap's flex row (only 32px along its main axis)
+    // shrinks the slider down from its specified width by default, well
+    // before the rotation ever gets a chance to reorient it.
+    flex-shrink: 0;
+    // Rotating -90deg (counterclockwise) turns "right/max" to point up, so
+    // higher BPM sits at the top of the vertical slider, as expected.
+    transform: rotate(-90deg);
+    accent-color: @accent;
+    cursor: pointer;
+}
+
+#bpm-value {
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    font-weight: bold;
+    color: @text;
+    min-width: 2.5em;
+    text-align: center;
 }

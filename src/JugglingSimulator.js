@@ -1,6 +1,19 @@
 import Ball from './Ball.js';
 import Throw from './Throw.js';
 
+// The simulation always runs its physics at this fixed internal tempo. BPM is
+// applied purely as a playback-rate multiplier (see setBpm/update), never by
+// re-deriving beat spacing or gravity. That keeps arc heights identical at any
+// tempo (we replay one fixed trajectory faster or slower) and makes tempo
+// changes seamless: nothing in flight has to be reconciled with a moved clock.
+const REFERENCE_BPM = 200;
+
+// How many evenly-spaced dots to lay down each time recordTrails decides to
+// record (see there) - a plain multiplier applied uniformly at every tempo,
+// so it thickens the trail overall without disturbing the balance between
+// tempos.
+const DOTS_PER_RECORDED_FRAME = 2;
+
 /**
  * Drives a juggling pattern from a notation-neutral schedule. Works in abstract
  * world units and continuous time so that later features (arbitrary-height,
@@ -17,11 +30,15 @@ export default class JugglingSimulator {
         this.numBalls = schedule.numBalls;
         this.slots = schedule.slots;
 
-        this.beatDuration = 60 / bpm;
         this.ballRadius = ballRadius;
-        // One real gravitational constant (world units/sec^2) governing every
-        // throw in the pattern, rather than a per-height scale factor - see
-        // arcPeakFor for why that distinction matters.
+
+        // Physics constants, fixed at the reference tempo for the simulator's
+        // whole life. beatDuration here is internal ("reference seconds"); the
+        // wall-clock tempo is applied later via timeScale in update().
+        this.beatDuration = 60 / REFERENCE_BPM;
+        // Fixed share of a beat spent in the inward hand sweep, since it's a
+        // hand motion rather than a scaled physical fall.
+        this.carryDuration = this.beatDuration * 0.42;
         this.gravity = gravity;
 
         // Wider stance for more balls so trajectories stay legible.
@@ -37,16 +54,37 @@ export default class JugglingSimulator {
             R: { outerX: outerR, innerX: outerR * innerRatio, ball: null, incomingVelocity: { x: 0, y: 0 } },
             L: { outerX: -outerR, innerX: -outerR * innerRatio, ball: null, incomingVelocity: { x: 0, y: 0 } },
         };
-
-        // Fixed real-world duration for the inward sweep, regardless of throw
-        // height, since it's a hand motion rather than a scaled physical fall.
-        this.carryDuration = this.beatDuration * 0.42;
         this.carryLift = this.handSpacing * 0.1;
 
+        // Internal simulation time, in reference-tempo seconds. It advances at
+        // timeScale x wall-clock (see update); the physics above are unaware of
+        // the current BPM entirely.
         this.time = 0;
+        this.timeScale = 1;
         this.nextBeat = 0;
+        this.nextBeatTime = 0;
         this.inFlight = [];
         this.spawned = 0;
+        // Every ball ever spawned, so trail bookkeeping can visit balls
+        // uniformly whether they're currently flying or resting in a hand.
+        this.balls = [];
+        // Counts calls to update(), i.e. animation frames - used to thin out
+        // trail recording at lower tempos (see recordTrails).
+        this.frameCount = 0;
+
+        this.setBpm(bpm);
+    }
+
+    /**
+     * Sets the tempo. This only changes how fast internal time advances - it
+     * never touches beat spacing, gravity, or anything already in flight. So a
+     * change mid-run is perfectly seamless: every ball simply continues along
+     * its exact same trajectory, faster or slower. Because the physics stay
+     * pinned to REFERENCE_BPM, arc heights are identical at any tempo.
+     */
+    setBpm(bpm) {
+        this.bpm = bpm;
+        this.timeScale = bpm / REFERENCE_BPM;
     }
 
     otherHand(hand) {
@@ -67,19 +105,17 @@ export default class JugglingSimulator {
     }
 
     update(dtSeconds) {
-        this.time += dtSeconds;
-        const currentBeat = this.time / this.beatDuration;
-        while (this.nextBeat <= currentBeat) {
-            this.processBeat(this.nextBeat);
-            this.nextBeat += 1;
-        }
-    }
+        // Advance internal time at the current playback rate. Everything below
+        // works in this scaled time, so tempo affects only the pace, never the
+        // geometry, of the pattern.
+        this.time += dtSeconds * this.timeScale;
 
-    processBeat(beat) {
-        // 1. Resolve any landings first so an arriving ball can be re-thrown.
+        // Resolve landings against each throw's own endTime. Since beat spacing
+        // is fixed, a throw's endTime lands exactly on the beat that re-throws
+        // it, so catch and re-throw stay in lockstep at every tempo.
         for (let i = this.inFlight.length - 1; i >= 0; i--) {
             const entry = this.inFlight[i];
-            if (entry.endBeat === beat) {
+            if (entry.flight.endTime <= this.time) {
                 const hand = this.hands[entry.destHand];
                 hand.ball = entry.ball;
                 // Remember how fast/which-way it was moving so the next carry
@@ -90,15 +126,68 @@ export default class JugglingSimulator {
             }
         }
 
-        // 2. Execute this beat's scheduled throw(s). The schedule names which
+        while (this.nextBeatTime <= this.time) {
+            this.processBeat(this.nextBeat, this.nextBeatTime);
+            this.nextBeat += 1;
+            this.nextBeatTime += this.beatDuration;
+        }
+
+        this.recordTrails();
+    }
+
+    /**
+     * Appends this instant's position to each flying ball's own trail, then
+     * trims every ball's trail to its current window. Recording (not just
+     * trimming) only happens for balls actually in flight - a resting ball's
+     * last few flight samples are left to simply age out - but trimming
+     * covers every ball, flying or resting, so a trail persists smoothly
+     * through the catch instant instead of vanishing the moment a ball
+     * lands, then rebuilding from nothing once it's thrown again.
+     *
+     * At most one recorded frame per animation frame, and fewer still at
+     * lower tempos - skipping `REFERENCE_BPM / bpm` frames between recorded
+     * ones - so a slow-motion pattern doesn't pack in as many dots as a fast
+     * one covering the same ground. Each recorded frame lays down
+     * DOTS_PER_RECORDED_FRAME dots spanning back to the last one (rather
+     * than a single dot right at this instant), both to thicken the trail a
+     * bit and to fill in, rather than skip past, whatever ground was
+     * covered on the frames in between.
+     */
+    recordTrails() {
+        this.frameCount += 1;
+        const frameSkip = Math.max(1, Math.round(REFERENCE_BPM / this.bpm));
+        if (this.frameCount % frameSkip === 0) {
+            for (const entry of this.inFlight) {
+                const ball = entry.ball;
+                const from = Number.isFinite(ball.lastTrailSampleTime) ? ball.lastTrailSampleTime : this.time;
+                for (let i = 1; i <= DOTS_PER_RECORDED_FRAME; i++) {
+                    const t = from + (this.time - from) * (i / DOTS_PER_RECORDED_FRAME);
+                    const pos = entry.flight.positionAt(t);
+                    ball.trail.push({ time: t, x: pos.x, y: pos.y });
+                }
+                ball.lastTrailSampleTime = this.time;
+            }
+        }
+        for (const ball of this.balls) {
+            const cutoff = this.time - ball.trailWindow;
+            let dropCount = 0;
+            while (dropCount < ball.trail.length && ball.trail[dropCount].time < cutoff) {
+                dropCount += 1;
+            }
+            if (dropCount > 0) ball.trail.splice(0, dropCount);
+        }
+    }
+
+    processBeat(beat, beatTime) {
+        // Execute this beat's scheduled throw(s). The schedule names which
         // hand(s) act rather than us inferring it from beat parity, since a
         // synchronous beat has both hands throwing at once.
         const slot = this.slots[beat % this.period];
-        if (slot.R) this.executeThrow(beat, 'R', slot.R);
-        if (slot.L) this.executeThrow(beat, 'L', slot.L);
+        if (slot.R) this.executeThrow(beatTime, 'R', slot.R);
+        if (slot.L) this.executeThrow(beatTime, 'L', slot.L);
     }
 
-    executeThrow(beat, sourceHand, throwSpec) {
+    executeThrow(beatTime, sourceHand, throwSpec) {
         const destHand = throwSpec.crossing ? this.otherHand(sourceHand) : sourceHand;
         const hand = this.hands[sourceHand];
 
@@ -106,6 +195,7 @@ export default class JugglingSimulator {
         if (!hand.ball) {
             if (this.spawned < this.numBalls) {
                 hand.ball = new Ball(this.spawned);
+                this.balls.push(hand.ball);
                 hand.incomingVelocity = { x: 0, y: 0 };
                 this.spawned += 1;
             } else {
@@ -119,8 +209,8 @@ export default class JugglingSimulator {
 
         const flight = new Throw({
             ball,
-            startTime: beat * this.beatDuration,
-            endTime: (beat + throwSpec.height) * this.beatDuration,
+            startTime: beatTime,
+            endTime: beatTime + throwSpec.height * this.beatDuration,
             catchX: hand.outerX,
             releaseX: hand.innerX,
             landX: this.hands[destHand].outerX,
@@ -130,18 +220,20 @@ export default class JugglingSimulator {
             carryLift: this.carryLift,
             incomingVelocity,
         });
+        // Governs how long this ball's trail stays visible, including after
+        // it lands - re-set on every throw so a lazy high throw still gets a
+        // proportionally longer trail than a quick low one (see recordTrails).
+        ball.trailWindow = flight.duration * 0.33;
 
         this.inFlight.push({
             flight,
             ball,
-            endBeat: beat + throwSpec.height,
             destHand,
         });
     }
 
     getRenderState() {
         const balls = [];
-        const trails = [];
         for (const entry of this.inFlight) {
             const pos = entry.flight.positionAt(this.time);
             balls.push({
@@ -150,7 +242,6 @@ export default class JugglingSimulator {
                 radius: this.ballRadius,
                 color: entry.ball.color,
             });
-            trails.push(this.sampleTrail(entry.flight));
         }
         for (const key of ['L', 'R']) {
             const hand = this.hands[key];
@@ -163,51 +254,11 @@ export default class JugglingSimulator {
                 });
             }
         }
+        // Each ball owns its own trail (see recordTrails), kept up to date
+        // whether the ball is flying or resting, so it fades out smoothly
+        // rather than disappearing the instant a ball is caught.
+        const trails = this.balls.map((ball) => ball.trail).filter((trail) => trail.length >= 2);
         return { balls, trails };
-    }
-
-    /**
-     * Only the already-traveled portion of a throw's path, oldest point
-     * first and ending exactly at the ball's current position - a comet
-     * trail behind the ball rather than a preview of where it's headed. The
-     * renderer fades it out along its length. Trail length scales with each
-     * throw's own duration (rather than a fixed time) so a lazy high throw
-     * gets a proportionally longer tail than a quick low one.
-     *
-     * The carry and flight portions of this window get their own fixed
-     * sample budgets (rather than one budget spread evenly over whatever
-     * time span the window happens to cover). Otherwise, whenever the
-     * window straddles the carry/flight boundary, only a couple of samples
-     * land inside the tightly-curved carry - and since the window slides
-     * every frame, exactly where those few samples land keeps shifting,
-     * which reads as the path jiggling right around the release point.
-     */
-    sampleTrail(flight, { carrySteps = 8, flightSteps = 16 } = {}) {
-        const trailDuration = flight.duration * 0.33;
-        const earliest = Math.max(flight.startTime, this.time - trailDuration);
-        const carryEnd = flight.startTime + flight.carryDuration;
-        const points = [];
-
-        if (earliest < carryEnd) {
-            const from = earliest;
-            const to = Math.min(this.time, carryEnd);
-            for (let i = 0; i <= carrySteps; i++) {
-                points.push(flight.positionAt(from + (i / carrySteps) * (to - from)));
-            }
-        }
-
-        if (this.time > carryEnd) {
-            const from = Math.max(earliest, carryEnd);
-            const to = this.time;
-            // Skip index 0 when the carry loop already placed a point here,
-            // so the seam isn't duplicated.
-            const startI = points.length > 0 ? 1 : 0;
-            for (let i = startI; i <= flightSteps; i++) {
-                points.push(flight.positionAt(from + (i / flightSteps) * (to - from)));
-            }
-        }
-
-        return points;
     }
 
     /**

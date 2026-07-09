@@ -3,7 +3,7 @@ import SyncSiteswap from './SyncSiteswap.js';
 import JugglingSimulator from './JugglingSimulator.js';
 import Renderer from './Renderer.js';
 
-const BPM = 200;
+const DEFAULT_BPM = 100;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 
 export default class App {
@@ -11,6 +11,8 @@ export default class App {
         this.$input = $('#siteswap-input');
         this.$button = $('#juggle-button');
         this.$message = $('#validation-message');
+        this.$bpmSlider = $('#bpm-slider');
+        this.$bpmValue = $('#bpm-value');
         this.canvas = document.getElementById('juggle-canvas');
 
         this.renderer = new Renderer(this.canvas);
@@ -18,6 +20,7 @@ export default class App {
         this.simulator = null;
         this.rafId = null;
         this.lastTimestamp = 0;
+        this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
 
         this.bindEvents();
         this.handleResize();
@@ -33,7 +36,19 @@ export default class App {
                 this.startJuggling();
             }
         });
+        this.$bpmSlider.on('input', () => this.setBpm(Number(this.$bpmSlider.val())));
         $(window).on('resize', () => this.handleResize());
+    }
+
+    setBpm(bpm) {
+        this.bpm = bpm;
+        this.$bpmValue.text(bpm);
+        // Live speed change: an already-running pattern keeps going, just
+        // faster or slower from here, rather than restarting from scratch.
+        if (this.simulator) {
+            this.simulator.setBpm(bpm);
+            this.renderer.fit(this.simulator.getExtent());
+        }
     }
 
     handleResize() {
@@ -74,7 +89,7 @@ export default class App {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
 
-        this.simulator = new JugglingSimulator(this.siteswap, { bpm: BPM });
+        this.simulator = new JugglingSimulator(this.siteswap, { bpm: this.bpm });
         this.renderer.fit(this.simulator.getExtent());
         this.lastTimestamp = performance.now();
         this.rafId = requestAnimationFrame((ts) => this.tick(ts));

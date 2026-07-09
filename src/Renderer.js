@@ -53,26 +53,29 @@ export default class Renderer {
         ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
         // Trails are drawn before the balls so they read as a fading tail
-        // behind each one, not a preview of where it's about to go.
+        // behind each one, not a preview of where it's about to go. Each
+        // recorded point gets its own dot rather than being connected into a
+        // dashed stroke - a dashed line needs a phase anchored to "distance
+        // from the trail's oldest surviving point," but that point keeps
+        // advancing forward as older ones age out, so the dashes would
+        // visibly crawl along the path every frame. A dot only ever sits at
+        // the one fixed world position it was recorded at, so it can't slide.
         if (state.trails) {
             ctx.save();
-            ctx.lineWidth = 1.5;
-            ctx.setLineDash([4, 6]);
             for (const trail of state.trails) {
                 if (trail.length < 2) continue;
-                const oldest = this.worldToScreen(trail[0].x, trail[0].y);
-                const newest = this.worldToScreen(trail[trail.length - 1].x, trail[trail.length - 1].y);
-                const gradient = ctx.createLinearGradient(oldest.x, oldest.y, newest.x, newest.y);
-                gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-                gradient.addColorStop(1, 'rgba(255, 255, 255, 0.85)');
-                ctx.strokeStyle = gradient;
-                ctx.beginPath();
-                trail.forEach((point, i) => {
+                const oldestTime = trail[0].time;
+                const span = Math.max(trail[trail.length - 1].time - oldestTime, 1e-6);
+
+                for (let i = 0; i < trail.length; i++) {
+                    const point = trail[i];
+                    const age = (point.time - oldestTime) / span;
                     const screen = this.worldToScreen(point.x, point.y);
-                    if (i === 0) ctx.moveTo(screen.x, screen.y);
-                    else ctx.lineTo(screen.x, screen.y);
-                });
-                ctx.stroke();
+                    ctx.beginPath();
+                    ctx.arc(screen.x, screen.y, 1.5, 0, Math.PI * 2);
+                    ctx.fillStyle = `rgba(255, 255, 255, ${(age * 0.85).toFixed(3)})`;
+                    ctx.fill();
+                }
             }
             ctx.restore();
         }

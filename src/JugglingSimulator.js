@@ -295,6 +295,11 @@ export default class JugglingSimulator {
      * next period boundary (so the harvested cycle starts clean rather than
      * mid-pattern), then simulates one further complete period and returns
      * that period's throws.
+     *
+     * Each returned path is tagged with `beat` - its offset (0..period-1)
+     * within that harvested period - so a caller wanting to highlight
+     * "whichever throw happens this beat" (e.g. a practice-mode cue) can
+     * match paths to the live beat count without re-deriving anything.
      */
     getGhostPaths() {
         let beat = 0;
@@ -320,11 +325,17 @@ export default class JugglingSimulator {
             const before = this.inFlight.length;
             this.processBeat(beat, beatTime);
             if (beat >= harvestStartBeat) {
-                harvested.push(...this.inFlight.slice(before));
+                const relativeBeat = beat - harvestStartBeat;
+                for (const entry of this.inFlight.slice(before)) {
+                    harvested.push({ beat: relativeBeat, entry });
+                }
             }
         }
 
-        return harvested.map((entry) => entry.flight.samplePath());
+        return harvested.map(({ beat: relativeBeat, entry }) => ({
+            beat: relativeBeat,
+            points: entry.flight.samplePath(),
+        }));
     }
 
     /**

@@ -85,22 +85,38 @@ export default class Renderer {
         // The static "ghost" of every throw the pattern should make, all
         // rendered at once and at a fixed opacity (no fade - there's no
         // "recency" to fade by, since nothing is actually moving here).
+        // Each entry is either a plain array of points, or a
+        // { points, highlighted } wrapper - used e.g. to pick out "whichever
+        // throw happens this beat" as a practice-mode cue - drawn brighter
+        // than the rest.
         if (state.staticPaths) {
             ctx.save();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
             ctx.lineWidth = Math.min(1.5, (state.ballRadius ?? 0.12) * this.camera.scale * 0.3);
             ctx.lineJoin = 'round';
             ctx.lineCap = 'round';
-            for (const path of state.staticPaths) {
-                if (path.length < 2) continue;
+            const strokePath = (points) => {
                 ctx.beginPath();
-                const first = this.worldToScreen(path[0].x, path[0].y);
+                const first = this.worldToScreen(points[0].x, points[0].y);
                 ctx.moveTo(first.x, first.y);
-                for (let i = 1; i < path.length; i++) {
-                    const screen = this.worldToScreen(path[i].x, path[i].y);
+                for (let i = 1; i < points.length; i++) {
+                    const screen = this.worldToScreen(points[i].x, points[i].y);
                     ctx.lineTo(screen.x, screen.y);
                 }
                 ctx.stroke();
+            };
+            // Two passes so a highlighted path always draws on top of the
+            // rest, regardless of where it falls in the array - otherwise
+            // an earlier, dimmer path drawn after it could visually cut into
+            // its highlight where the two cross.
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.25)';
+            for (const entry of state.staticPaths) {
+                const points = Array.isArray(entry) ? entry : entry.points;
+                if (points.length >= 2 && !entry.highlighted) strokePath(points);
+            }
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+            for (const entry of state.staticPaths) {
+                const points = Array.isArray(entry) ? entry : entry.points;
+                if (points.length >= 2 && entry.highlighted) strokePath(points);
             }
             ctx.restore();
         }

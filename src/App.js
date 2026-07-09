@@ -24,10 +24,14 @@ export default class App {
         // Only set while the "Show me" demo animation is actually running.
         this.simulator = null;
         // Static geometry for "Let me try!" preview mode - recomputed once
-        // per startPreview() call, then just redrawn as-is (e.g. on resize).
+        // per startPreview() call, then just redrawn as-is (e.g. on resize),
+        // aside from which beat is currently highlighted (see previewTick).
         this.previewPaths = null;
         this.previewExtent = null;
         this.previewBallRadius = null;
+        this.previewPeriod = null;
+        this.previewBeatIndex = 0;
+        this.previewBeatElapsed = 0;
         this.rafId = null;
         this.lastTimestamp = 0;
         this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
@@ -160,18 +164,49 @@ export default class App {
         this.previewPaths = ghost.getGhostPaths();
         this.previewExtent = ghost.getExtent();
         this.previewBallRadius = ghost.ballRadius;
+        this.previewPeriod = ghost.period;
+        this.previewBeatIndex = 0;
+        this.previewBeatElapsed = 0;
 
         this.renderer.fit(this.previewExtent);
         this.drawPreview();
 
         this.showStopButton();
         this.startBeatBar();
+
+        this.lastTimestamp = performance.now();
+        this.rafId = requestAnimationFrame((ts) => this.previewTick(ts));
+    }
+
+    /**
+     * Experimental practice cue: advances which ghost path is drawn
+     * highlighted in step with the beat bar, so "the throw due this beat"
+     * reads as brighter white against the rest, faded gray. Only the
+     * highlight index changes here - the paths themselves are the same
+     * fixed geometry computed once in startPreview().
+     */
+    previewTick(timestamp) {
+        const dt = Math.min((timestamp - this.lastTimestamp) / 1000, MAX_FRAME_DT);
+        this.lastTimestamp = timestamp;
+
+        const beatDuration = 60 / this.bpm;
+        this.previewBeatElapsed += dt;
+        while (this.previewBeatElapsed >= beatDuration) {
+            this.previewBeatElapsed -= beatDuration;
+            this.previewBeatIndex = (this.previewBeatIndex + 1) % this.previewPeriod;
+        }
+        this.drawPreview();
+
+        this.rafId = requestAnimationFrame((ts) => this.previewTick(ts));
     }
 
     drawPreview() {
         this.renderer.draw({
             balls: [],
-            staticPaths: this.previewPaths,
+            staticPaths: this.previewPaths.map((path) => ({
+                points: path.points,
+                highlighted: path.beat === this.previewBeatIndex,
+            })),
             ballRadius: this.previewBallRadius,
         });
     }
@@ -197,6 +232,7 @@ export default class App {
         this.previewPaths = null;
         this.previewExtent = null;
         this.previewBallRadius = null;
+        this.previewPeriod = null;
         this.$beatBarWrap.addClass('hidden');
         this.renderer.draw({ balls: [] });
         this.showActionButtons();

@@ -1,4 +1,5 @@
 import Siteswap from './Siteswap.js';
+import SyncSiteswap from './SyncSiteswap.js';
 import JugglingSimulator from './JugglingSimulator.js';
 import Renderer from './Renderer.js';
 
@@ -51,7 +52,7 @@ export default class App {
         this.stop();
 
         const raw = this.$input.val();
-        this.siteswap = Siteswap.parse(raw);
+        this.siteswap = SyncSiteswap.looksLikeSync(raw) ? SyncSiteswap.parse(raw) : Siteswap.parse(raw);
 
         if (this.siteswap.isValid) {
             const { numBalls, period } = this.siteswap;

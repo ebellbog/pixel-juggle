@@ -49,11 +49,6 @@ export default class JugglingSimulator {
         this.spawned = 0;
     }
 
-    handForBeat(beat) {
-        // Beat 0 is the right hand; hands alternate every beat (async model).
-        return beat % 2 === 0 ? 'R' : 'L';
-    }
-
     otherHand(hand) {
         return hand === 'R' ? 'L' : 'R';
     }
@@ -95,12 +90,16 @@ export default class JugglingSimulator {
             }
         }
 
-        // 2. Execute this beat's scheduled throw, if any.
+        // 2. Execute this beat's scheduled throw(s). The schedule names which
+        // hand(s) act rather than us inferring it from beat parity, since a
+        // synchronous beat has both hands throwing at once.
         const slot = this.slots[beat % this.period];
-        if (!slot) return;
+        if (slot.R) this.executeThrow(beat, 'R', slot.R);
+        if (slot.L) this.executeThrow(beat, 'L', slot.L);
+    }
 
-        const sourceHand = this.handForBeat(beat);
-        const destHand = slot.crossing ? this.otherHand(sourceHand) : sourceHand;
+    executeThrow(beat, sourceHand, throwSpec) {
+        const destHand = throwSpec.crossing ? this.otherHand(sourceHand) : sourceHand;
         const hand = this.hands[sourceHand];
 
         // Feed balls in one at a time as the pattern establishes itself.
@@ -121,12 +120,12 @@ export default class JugglingSimulator {
         const flight = new Throw({
             ball,
             startTime: beat * this.beatDuration,
-            endTime: (beat + slot.height) * this.beatDuration,
-            catchX: this.hands[sourceHand].outerX,
-            releaseX: this.hands[sourceHand].innerX,
+            endTime: (beat + throwSpec.height) * this.beatDuration,
+            catchX: hand.outerX,
+            releaseX: hand.innerX,
             landX: this.hands[destHand].outerX,
             baseY: this.handY,
-            arcPeak: this.arcPeakFor(slot.height),
+            arcPeak: this.arcPeakFor(throwSpec.height),
             carryDuration: this.carryDuration,
             carryLift: this.carryLift,
             incomingVelocity,
@@ -135,7 +134,7 @@ export default class JugglingSimulator {
         this.inFlight.push({
             flight,
             ball,
-            endBeat: beat + slot.height,
+            endBeat: beat + throwSpec.height,
             destHand,
         });
     }
@@ -220,16 +219,19 @@ export default class JugglingSimulator {
         let maxHeight = 0;
         let maxDip = 0;
         for (const slot of this.slots) {
-            if (!slot) continue;
-            maxHeight = Math.max(maxHeight, slot.height);
-            // The recoil dip is driven by how steeply the ball was falling
-            // when caught (see Throw.carryPositionAt); estimate its size from
-            // this throw's own landing velocity as a stand-in for "whatever
-            // throw lands in this slot's hand next".
-            const flightDuration = slot.height * this.beatDuration - this.carryDuration;
-            if (flightDuration <= 0) continue;
-            const landVy = (-this.carryLift - 4 * this.arcPeakFor(slot.height)) / flightDuration;
-            maxDip = Math.max(maxDip, (Math.abs(landVy) * this.carryDuration) / 3);
+            for (const throwSpec of [slot.R, slot.L]) {
+                if (!throwSpec) continue;
+                const height = throwSpec.height;
+                maxHeight = Math.max(maxHeight, height);
+                // The recoil dip is driven by how steeply the ball was
+                // falling when caught (see Throw.carryPositionAt); estimate
+                // its size from this throw's own landing velocity as a
+                // stand-in for "whatever throw lands in this slot's hand next".
+                const flightDuration = height * this.beatDuration - this.carryDuration;
+                if (flightDuration <= 0) continue;
+                const landVy = (-this.carryLift - 4 * this.arcPeakFor(height)) / flightDuration;
+                maxDip = Math.max(maxDip, (Math.abs(landVy) * this.carryDuration) / 3);
+            }
         }
         const margin = this.ballRadius * 2;
         const topY = this.handY + Math.max(this.arcPeakFor(maxHeight), this.carryLift);

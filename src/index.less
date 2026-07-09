@@ -59,19 +59,28 @@ body {
     }
 }
 
-#juggle-button {
+.hidden {
+    display: none !important;
+}
+
+#action-buttons {
+    display: flex;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.action-button {
     font-size: 16px;
     font-weight: bold;
     padding: 9px 20px;
     border: none;
     border-radius: 6px;
-    background-color: @accent;
     color: white;
     cursor: pointer;
     transition: background-color 0.15s ease, transform 0.1s ease;
 
     &:hover:not(:disabled) {
-        background-color: lighten(@accent, 8%);
+        filter: brightness(1.1);
     }
 
     &:active:not(:disabled) {
@@ -79,22 +88,24 @@ body {
     }
 
     &:disabled {
-        background-color: #2a2a3d;
-        color: #666;
+        opacity: 0.4;
         cursor: not-allowed;
     }
 
-    &.playing {
-        background-color: @invalid;
+    &.secondary {
+        background-color: #4a4a5e;
+    }
 
-        &:hover:not(:disabled) {
-            background-color: lighten(@invalid, 8%);
-        }
+    &.primary {
+        background-color: @accent;
+    }
+
+    &.stop {
+        background-color: @invalid;
     }
 }
 
 #validation-message {
-    margin-left: auto;
     font-size: 14px;
 
     &.valid {
@@ -110,6 +121,45 @@ body {
     position: relative;
     flex: 1;
     min-height: 0;
+}
+
+// The metronome for "Let me try!" gameplay mode - jumps to full width at the
+// start of each beat, then shrinks to nothing by the next one. Toggling
+// .hidden on the wrap (rather than pausing/resuming) is also what resets the
+// animation to its start each time preview mode begins, since a display:none
+// element's animation drops back to its 0% keyframe and restarts the next
+// time it's shown.
+#beat-bar-wrap {
+    position: absolute;
+    left: 50%;
+    bottom: 10%;
+    transform: translateX(-50%);
+    width: 40%;
+    max-width: 400px;
+    height: 12px;
+    pointer-events: none;
+}
+
+#beat-bar {
+    width: 100%;
+    height: 100%;
+    opacity: .75;
+    background: linear-gradient(to right, transparent, white 20%, white 80%, transparent);
+    border-radius: 4px;
+    transform-origin: center;
+    animation-name: beat-pulse;
+    animation-timing-function: linear;
+    animation-iteration-count: infinite;
+}
+
+@keyframes beat-pulse {
+    0% {
+        transform: scaleX(1);
+    }
+
+    100% {
+        transform: scaleX(0);
+    }
 }
 
 #juggle-canvas {

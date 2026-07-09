@@ -11,11 +11,18 @@
             <label for="siteswap-input">Siteswap</label>
             <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
                 autocorrect="off" spellcheck="false" placeholder="e.g. 531" value="3">
-            <button id="juggle-button" disabled>Juggle!</button>
             <div id="validation-message"></div>
+            <div id="action-buttons">
+                <button id="show-me-button" class="action-button secondary" disabled>Show me</button>
+                <button id="try-button" class="action-button primary" disabled>Let me try!</button>
+                <button id="stop-button" class="action-button stop hidden">Stop</button>
+            </div>
         </header>
         <div id="canvas-area">
             <canvas id="juggle-canvas"></canvas>
+            <div id="beat-bar-wrap" class="hidden">
+                <div id="beat-bar"></div>
+            </div>
             <div id="bpm-control">
                 <label for="bpm-slider">BPM</label>
                 <div id="bpm-slider-wrap">

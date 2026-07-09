@@ -60,12 +60,10 @@ export default class Renderer {
         // advancing forward as older ones age out, so the dashes would
         // visibly crawl along the path every frame. A dot only ever sits at
         // the one fixed world position it was recorded at, so it can't slide.
+        const dotRadius = Math.min(1.5, (state.ballRadius ?? 0.12) * this.camera.scale * 0.3);
+
         if (state.trails) {
             ctx.save();
-            const trailRadius = Math.min(
-                1.5,
-                (state.balls[0]?.radius ?? 0.12) * this.camera.scale * 0.3,
-            );
             for (const trail of state.trails) {
                 if (trail.length < 2) continue;
                 const oldestTime = trail[0].time;
@@ -76,10 +74,33 @@ export default class Renderer {
                     const age = (point.time - oldestTime) / span;
                     const screen = this.worldToScreen(point.x, point.y);
                     ctx.beginPath();
-                    ctx.arc(screen.x, screen.y, trailRadius, 0, Math.PI * 2);
+                    ctx.arc(screen.x, screen.y, dotRadius, 0, Math.PI * 2);
                     ctx.fillStyle = `rgba(255, 255, 255, ${(age * 0.85).toFixed(3)})`;
                     ctx.fill();
                 }
+            }
+            ctx.restore();
+        }
+
+        // The static "ghost" of every throw the pattern should make, all
+        // rendered at once and at a fixed opacity (no fade - there's no
+        // "recency" to fade by, since nothing is actually moving here).
+        if (state.staticPaths) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = Math.min(1.5, (state.ballRadius ?? 0.12) * this.camera.scale * 0.3);
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            for (const path of state.staticPaths) {
+                if (path.length < 2) continue;
+                ctx.beginPath();
+                const first = this.worldToScreen(path[0].x, path[0].y);
+                ctx.moveTo(first.x, first.y);
+                for (let i = 1; i < path.length; i++) {
+                    const screen = this.worldToScreen(path[i].x, path[i].y);
+                    ctx.lineTo(screen.x, screen.y);
+                }
+                ctx.stroke();
             }
             ctx.restore();
         }

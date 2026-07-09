@@ -8,6 +8,16 @@ import Throw from './Throw.js';
 // changes seamless: nothing in flight has to be reconciled with a moved clock.
 const REFERENCE_BPM = 200;
 
+// Tolerance for the endTime <= uptoTime landing check. A throw's endTime and
+// a beat boundary it should land exactly on are computed via slightly
+// different arithmetic (one accumulates a running time, the other multiplies
+// a beat index by beatDuration), so they can differ by a floating-point
+// rounding hair even though they're conceptually identical instants. Without
+// this slack, getGhostPaths() - which checks landings at exactly each beat's
+// own computed time - can occasionally miss a landing by that hair and
+// silently skip the beat's throw entirely (its hand finds no ball waiting).
+const LANDING_EPSILON = 1e-9;
+
 // How many evenly-spaced dots to lay down each time recordTrails decides to
 // record (see there) - a plain multiplier applied uniformly at every tempo,
 // so it thickens the trail overall without disturbing the balance between
@@ -110,21 +120,7 @@ export default class JugglingSimulator {
         // geometry, of the pattern.
         this.time += dtSeconds * this.timeScale;
 
-        // Resolve landings against each throw's own endTime. Since beat spacing
-        // is fixed, a throw's endTime lands exactly on the beat that re-throws
-        // it, so catch and re-throw stay in lockstep at every tempo.
-        for (let i = this.inFlight.length - 1; i >= 0; i--) {
-            const entry = this.inFlight[i];
-            if (entry.flight.endTime <= this.time) {
-                const hand = this.hands[entry.destHand];
-                hand.ball = entry.ball;
-                // Remember how fast/which-way it was moving so the next carry
-                // this hand builds leaves the catch point on that same
-                // trajectory instead of snapping to rest.
-                hand.incomingVelocity = entry.flight.landVelocity;
-                this.inFlight.splice(i, 1);
-            }
-        }
+        this.resolveLandings(this.time);
 
         while (this.nextBeatTime <= this.time) {
             this.processBeat(this.nextBeat, this.nextBeatTime);
@@ -133,6 +129,28 @@ export default class JugglingSimulator {
         }
 
         this.recordTrails();
+    }
+
+    /**
+     * Resolves any in-flight throw whose endTime has passed uptoTime: hands
+     * it to its destination hand and records the velocity it landed with, so
+     * the next carry that hand builds leaves the catch point on that same
+     * trajectory instead of snapping to rest. Since beat spacing is fixed, a
+     * throw's endTime lands exactly on the beat that re-throws it, so catch
+     * and re-throw stay in lockstep at every tempo. Split out from update()
+     * so getGhostPaths() can drive the same landing logic synchronously,
+     * beat by beat, without going through a live animation clock at all.
+     */
+    resolveLandings(uptoTime) {
+        for (let i = this.inFlight.length - 1; i >= 0; i--) {
+            const entry = this.inFlight[i];
+            if (entry.flight.endTime <= uptoTime + LANDING_EPSILON) {
+                const hand = this.hands[entry.destHand];
+                hand.ball = entry.ball;
+                hand.incomingVelocity = entry.flight.landVelocity;
+                this.inFlight.splice(i, 1);
+            }
+        }
     }
 
     /**
@@ -258,7 +276,55 @@ export default class JugglingSimulator {
         // whether the ball is flying or resting, so it fades out smoothly
         // rather than disappearing the instant a ball is caught.
         const trails = this.balls.map((ball) => ball.trail).filter((trail) => trail.length >= 2);
-        return { balls, trails };
+        return { balls, trails, ballRadius: this.ballRadius };
+    }
+
+    /**
+     * The static "ghost" path every throw in the pattern should trace, all at
+     * once, for a preview/practice view where nothing is actually animated.
+     * Never call this on a simulator you're also ticking with update() -
+     * it drives this.processBeat/resolveLandings directly, on its own
+     * synchronous beat-by-beat clock, to fully settle the pattern first.
+     *
+     * A throw's landVelocity depends only on its own slot's fixed geometry
+     * (see Throw.landVelocity) - never on how the ball was caught - so once
+     * every ball has entered circulation, the very next full period's throws
+     * already have exactly the steady-state incoming velocity real
+     * gameplay would produce, with no extra settling time needed. Warm-up
+     * simply runs beats until every ball has spawned in, rounds up to the
+     * next period boundary (so the harvested cycle starts clean rather than
+     * mid-pattern), then simulates one further complete period and returns
+     * that period's throws.
+     */
+    getGhostPaths() {
+        let beat = 0;
+        while (this.spawned < this.numBalls) {
+            const beatTime = beat * this.beatDuration;
+            this.resolveLandings(beatTime);
+            this.processBeat(beat, beatTime);
+            beat += 1;
+        }
+
+        // Collect each harvest-window throw at the moment executeThrow
+        // creates it (a fresh entry always lands at the end of inFlight),
+        // rather than reading whatever remains in inFlight once the loop
+        // ends - a short throw made early in the window may well have
+        // already landed, and been removed by resolveLandings, before later
+        // beats in the same window even run.
+        const harvestStartBeat = Math.ceil(beat / this.period) * this.period;
+        const harvestEndBeat = harvestStartBeat + this.period;
+        const harvested = [];
+        for (; beat < harvestEndBeat; beat++) {
+            const beatTime = beat * this.beatDuration;
+            this.resolveLandings(beatTime);
+            const before = this.inFlight.length;
+            this.processBeat(beat, beatTime);
+            if (beat >= harvestStartBeat) {
+                harvested.push(...this.inFlight.slice(before));
+            }
+        }
+
+        return harvested.map((entry) => entry.flight.samplePath());
     }
 
     /**

@@ -1,5 +1,6 @@
 import Ball from './Ball.js';
 import Throw from './Throw.js';
+import { queueSlotPosition, queueSlotIndexForRender, QUEUE_SPACING_RADII } from './HandQueue.js';
 
 // The simulation always runs its physics at this fixed internal tempo. BPM is
 // applied purely as a playback-rate multiplier (see setBpm/update), never by
@@ -25,6 +26,46 @@ const LANDING_EPSILON = 1e-9;
 const DOTS_PER_RECORDED_FRAME = 2;
 
 /**
+ * Which hand each of the pattern's numBalls balls will be spawned into, in
+ * spawn order - i.e. exactly replaying executeThrow's own "does this hand
+ * already have a ball, and if not, spawn one" decision (see there), but in
+ * abstract beat-integer units and without creating any real Ball/Throw
+ * objects, purely to know in advance where a not-yet-spawned ball's queue
+ * placeholder belongs (see getRenderState/getExtent). Every siteswap height
+ * is a whole number of beats, so tracking landings as `beat + height` and
+ * comparing with plain `<=` is exact - no floating-point landing slop needed
+ * here the way resolveLandings needs LANDING_EPSILON.
+ */
+function computeSpawnOrder(slots, period, numBalls) {
+    const holding = { R: false, L: false };
+    const inFlight = []; // { landBeat, destHand }
+    const spawnOrder = [];
+    let beat = 0;
+    while (spawnOrder.length < numBalls) {
+        for (let i = inFlight.length - 1; i >= 0; i--) {
+            if (inFlight[i].landBeat <= beat) {
+                holding[inFlight[i].destHand] = true;
+                inFlight.splice(i, 1);
+            }
+        }
+        const slot = slots[beat % period];
+        for (const hand of ['R', 'L']) {
+            const throwSpec = slot[hand];
+            if (!throwSpec) continue;
+            if (holding[hand]) {
+                holding[hand] = false;
+            } else if (spawnOrder.length < numBalls) {
+                spawnOrder.push(hand);
+            }
+            const destHand = throwSpec.crossing ? (hand === 'R' ? 'L' : 'R') : hand;
+            inFlight.push({ landBeat: beat + throwSpec.height, destHand });
+        }
+        beat += 1;
+    }
+    return spawnOrder;
+}
+
+/**
  * Drives a juggling pattern from a notation-neutral schedule. Works in abstract
  * world units and continuous time so that later features (arbitrary-height,
  * arbitrary-timing player throws) can feed events through the same path without
@@ -34,11 +75,17 @@ const DOTS_PER_RECORDED_FRAME = 2;
  * at y = 0; throws arc upward.
  */
 export default class JugglingSimulator {
-    constructor(siteswap, { bpm = 200, ballRadius = 0.12, gravity = 20 } = {}) {
+    constructor(siteswap, { bpm = 200, ballRadius = 0.12, gravity = 20, _skipSteadyStateProbe = false } = {}) {
+        this._siteswap = siteswap;
+        this._steadyStateOpts = { bpm, ballRadius, gravity, _skipSteadyStateProbe: true };
         const schedule = siteswap.toSchedule();
         this.period = schedule.period;
         this.numBalls = schedule.numBalls;
         this.slots = schedule.slots;
+        // Which hand each ball will be fed into, in spawn order - fixed for
+        // the pattern's whole life, used only to lay out not-yet-spawned
+        // balls as a waiting queue (see getRenderState/getExtent).
+        this.spawnOrder = computeSpawnOrder(this.slots, this.period, this.numBalls);
 
         this.ballRadius = ballRadius;
 
@@ -81,8 +128,42 @@ export default class JugglingSimulator {
         // Counts calls to update(), i.e. animation frames - used to thin out
         // trail recording at lower tempos (see recordTrails).
         this.frameCount = 0;
+        // Per-hand inward-shift window for the spawn queue - set when the
+        // innermost queued ball is fed into the pattern (executeThrow) and
+        // read when laying out the queue (getRenderState).
+        this.queueShiftStart = { L: -Infinity, R: -Infinity };
+        this.queueShiftUntil = { L: -Infinity, R: -Infinity };
+        // Per (beat-in-period, hand) incoming velocity once the pattern has
+        // settled - harvested by getGhostPaths (see there) and used to seed
+        // spawn/first throws so their carry matches the ghost paths.
+        this.steadyStateIncoming = null;
+        // True while getGhostPaths is driving warm-up/harvest on this
+        // instance - spawn throws during that window must stay at rest so we
+        // don't recurse into another probe sim while building the map.
+        this._buildingSteadyState = false;
 
         this.setBpm(bpm);
+    }
+
+    _ensureSteadyStateIncoming() {
+        if (this.steadyStateIncoming || this._buildingSteadyState) return;
+        const probe = new JugglingSimulator(this._siteswap, this._steadyStateOpts);
+        probe.getGhostPaths();
+        this.steadyStateIncoming = probe.steadyStateIncoming;
+    }
+
+    /**
+     * Steady-state catch velocity for a throw from `hand` on beat
+     * `beatIndex` (mod period) - i.e. what the ghost paths assume the hand
+     * is recoiling from. Falls back to rest if the map hasn't been built yet
+     * or this slot never throws.
+     */
+    getSteadyStateIncoming(hand, beatIndex) {
+        this._ensureSteadyStateIncoming();
+        if (!this.steadyStateIncoming) return { x: 0, y: 0 };
+        const rel = ((beatIndex % this.period) + this.period) % this.period;
+        const entry = this.steadyStateIncoming[rel]?.[hand];
+        return entry ? { x: entry.x, y: entry.y } : { x: 0, y: 0 };
     }
 
     /**
@@ -201,21 +282,28 @@ export default class JugglingSimulator {
         // hand(s) act rather than us inferring it from beat parity, since a
         // synchronous beat has both hands throwing at once.
         const slot = this.slots[beat % this.period];
-        if (slot.R) this.executeThrow(beatTime, 'R', slot.R);
-        if (slot.L) this.executeThrow(beatTime, 'L', slot.L);
+        if (slot.R) this.executeThrow(beat, beatTime, 'R', slot.R);
+        if (slot.L) this.executeThrow(beat, beatTime, 'L', slot.L);
     }
 
-    executeThrow(beatTime, sourceHand, throwSpec) {
+    executeThrow(beat, beatTime, sourceHand, throwSpec) {
         const destHand = throwSpec.crossing ? this.otherHand(sourceHand) : sourceHand;
         const hand = this.hands[sourceHand];
 
         // Feed balls in one at a time as the pattern establishes itself.
         if (!hand.ball) {
             if (this.spawned < this.numBalls) {
+                const hasQueueBehind = this.spawnOrder
+                    .slice(this.spawned + 1)
+                    .some((h) => h === sourceHand);
                 hand.ball = new Ball(this.spawned);
                 this.balls.push(hand.ball);
-                hand.incomingVelocity = { x: 0, y: 0 };
+                hand.incomingVelocity = this.getSteadyStateIncoming(sourceHand, beat);
                 this.spawned += 1;
+                if (hasQueueBehind) {
+                    this.queueShiftStart[sourceHand] = beatTime;
+                    this.queueShiftUntil[sourceHand] = beatTime + this.carryDuration;
+                }
             } else {
                 return; // Should not happen for a validated pattern.
             }
@@ -272,6 +360,25 @@ export default class JugglingSimulator {
                 });
             }
         }
+        // Balls not yet fed into the pattern wait in a queue under whichever
+        // hand will eventually spawn them (see computeSpawnOrder) - purely
+        // cosmetic since executeThrow spawns for real regardless of whether
+        // this queue is ever rendered, but it means the player isn't staring
+        // at empty hands while a pattern with many balls first gets going.
+        // Not-yet-spawned balls are always exactly the suffix
+        // [this.spawned, numBalls) of spawnOrder, so their depth within
+        // their hand's queue is just their count of same-hand predecessors
+        // still in that suffix.
+        const queueDepth = { R: 0, L: 0 };
+        for (let id = this.spawned; id < this.numBalls; id++) {
+            const hand = this.spawnOrder[id];
+            const slot = queueSlotIndexForRender(
+                queueDepth[hand], this.time, this.queueShiftStart[hand], this.queueShiftUntil[hand],
+            );
+            const pos = queueSlotPosition(this.hands, this.handY, this.ballRadius, hand, slot);
+            balls.push({ x: pos.x, y: pos.y, radius: this.ballRadius, color: Ball.colorFor(id) });
+            queueDepth[hand] += 1;
+        }
         // Each ball owns its own trail (see recordTrails), kept up to date
         // whether the ball is flying or resting, so it fades out smoothly
         // rather than disappearing the instant a ball is caught.
@@ -302,6 +409,8 @@ export default class JugglingSimulator {
      * match paths to the live beat count without re-deriving anything.
      */
     getGhostPaths() {
+        this._buildingSteadyState = true;
+        try {
         let beat = 0;
         while (this.spawned < this.numBalls) {
             const beatTime = beat * this.beatDuration;
@@ -319,9 +428,25 @@ export default class JugglingSimulator {
         const harvestStartBeat = Math.ceil(beat / this.period) * this.period;
         const harvestEndBeat = harvestStartBeat + this.period;
         const harvested = [];
+        this.steadyStateIncoming = [];
         for (; beat < harvestEndBeat; beat++) {
             const beatTime = beat * this.beatDuration;
             this.resolveLandings(beatTime);
+            if (beat >= harvestStartBeat) {
+                const relativeBeat = beat - harvestStartBeat;
+                const slot = this.slots[beat % this.period];
+                for (const hand of ['R', 'L']) {
+                    if (!slot[hand]) continue;
+                    if (!this.steadyStateIncoming[relativeBeat]) {
+                        this.steadyStateIncoming[relativeBeat] = {};
+                    }
+                    const incoming = this.hands[hand].incomingVelocity;
+                    this.steadyStateIncoming[relativeBeat][hand] = {
+                        x: incoming.x,
+                        y: incoming.y,
+                    };
+                }
+            }
             const before = this.inFlight.length;
             this.processBeat(beat, beatTime);
             if (beat >= harvestStartBeat) {
@@ -336,6 +461,9 @@ export default class JugglingSimulator {
             beat: relativeBeat,
             points: entry.flight.samplePath(),
         }));
+        } finally {
+            this._buildingSteadyState = false;
+        }
     }
 
     /**
@@ -343,7 +471,15 @@ export default class JugglingSimulator {
      * uses this to fit the view; it is also the hook for future auto-zoom driven
      * by ball count and max throw height.
      */
-    getExtent() {
+    /**
+     * `includeSpawnQueue` defaults on for "Show me" (via App), which relies
+     * on this to size the one static fit its whole run uses around the
+     * not-yet-spawned queue's initial width. Game passes false: it needs a
+     * much larger (worst-case, unbounded-by-schedule) queue allowance of its
+     * own regardless (see Game.buildExtent), so including this fixed,
+     * schedule-derived term here too would just pad the same margin twice.
+     */
+    getExtent({ includeSpawnQueue = true } = {}) {
         let maxHeight = 0;
         let maxDip = 0;
         for (const slot of this.slots) {
@@ -365,7 +501,23 @@ export default class JugglingSimulator {
         const topY = this.handY + Math.max(this.arcPeakFor(maxHeight), this.carryLift);
         const bottomY = this.handY - maxDip;
         // Carry/flight never travels outside each hand's outer catch position.
-        const halfWidth = this.handSpacing / 2 + margin;
+        let halfWidth = this.handSpacing / 2 + margin;
+
+        if (includeSpawnQueue) {
+            // The not-yet-spawned queue (see getRenderState) is deepest at
+            // time zero, before any spawning has shrunk it, when it holds
+            // every ball ultimately assigned to that hand - a plain count
+            // over the fixed spawnOrder, no simulation needed. It can only
+            // shrink from there, so this is an exact bound, not a
+            // conservative guess.
+            let maxQueueDepth = 0;
+            for (const hand of ['R', 'L']) {
+                const depth = this.spawnOrder.filter((h) => h === hand).length;
+                maxQueueDepth = Math.max(maxQueueDepth, depth);
+            }
+            halfWidth += this.ballRadius * QUEUE_SPACING_RADII * Math.max(0, maxQueueDepth - 1);
+        }
+
         return {
             minX: -halfWidth,
             maxX: halfWidth,

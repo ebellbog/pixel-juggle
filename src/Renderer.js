@@ -62,6 +62,10 @@ export default class Renderer {
         // the one fixed world position it was recorded at, so it can't slide.
         if (state.trails) {
             ctx.save();
+            const trailRadius = Math.min(
+                1.5,
+                (state.balls[0]?.radius ?? 0.12) * this.camera.scale * 0.3,
+            );
             for (const trail of state.trails) {
                 if (trail.length < 2) continue;
                 const oldestTime = trail[0].time;
@@ -72,7 +76,7 @@ export default class Renderer {
                     const age = (point.time - oldestTime) / span;
                     const screen = this.worldToScreen(point.x, point.y);
                     ctx.beginPath();
-                    ctx.arc(screen.x, screen.y, 1.5, 0, Math.PI * 2);
+                    ctx.arc(screen.x, screen.y, trailRadius, 0, Math.PI * 2);
                     ctx.fillStyle = `rgba(255, 255, 255, ${(age * 0.85).toFixed(3)})`;
                     ctx.fill();
                 }

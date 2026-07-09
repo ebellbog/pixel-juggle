@@ -29,6 +29,12 @@ export default class App {
 
     bindEvents() {
         this.$input.on('input', () => this.validate());
+        this.$input.on('keydown', (event) => {
+            if (event.key === 'Enter' && !this.$button.prop('disabled')) {
+                event.preventDefault();
+                this.$button.trigger('click');
+            }
+        });
         this.$button.on('click', () => {
             if (this.simulator) {
                 this.stop();

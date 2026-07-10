@@ -1,5 +1,10 @@
+// How long (as a fraction of one beat) the player has to climb the height
+// ladder - ring progression and the cancel threshold both use this window,
+// not the full beat (see computeLitRings and chargePastCancelThreshold).
+export const CHARGE_WINDOW_FRACTION = 0.6;
+
 // How long (as a fraction of one beat) the wedge flashes red right after
-// the hold crosses a full beat - feedback that releasing now cancels.
+// the hold crosses the charge window - feedback that releasing now cancels.
 export const CANCEL_FLASH_FRACTION = 0.20;
 
 /**
@@ -21,34 +26,36 @@ export function getAvailableHeights(maxHeight) {
 
 /**
  * How many rings (1..ringTotal) should be lit after `elapsedSeconds` of hold,
- * given the current `beatDurationSeconds`. The beat is split into equal
- * windows - e.g. three rings at 33% / 66% / 100% - and rings accumulate:
- * first window lights ring 1, second lights 1+2, third lights 1+2+3. Returns
- * 0 if there are no rings.
+ * given the current `beatDurationSeconds`. The charge window (see
+ * CHARGE_WINDOW_FRACTION) is split into equal windows - e.g. three rings at
+ * 33% / 66% / 100% of that window - and rings accumulate: first window lights
+ * ring 1, second lights 1+2, third lights 1+2+3. Returns 0 if there are no
+ * rings.
  */
 export function computeLitRings(ringTotal, elapsedSeconds, beatDurationSeconds) {
     if (ringTotal <= 0) return 0;
     if (ringTotal === 1) return 1;
-    const elapsedFraction = beatDurationSeconds > 0 ? elapsedSeconds / beatDurationSeconds : 1;
+    const chargeWindowSeconds = beatDurationSeconds * CHARGE_WINDOW_FRACTION;
+    const elapsedFraction = chargeWindowSeconds > 0 ? elapsedSeconds / chargeWindowSeconds : 1;
     if (elapsedFraction >= 1) return ringTotal;
     return Math.min(ringTotal, Math.floor(elapsedFraction * ringTotal) + 1);
 }
 
-/** True once the button has been held for at least one full beat. */
+/** True once the button has been held past the charge window. */
 export function chargePastCancelThreshold(elapsedSeconds, beatDurationSeconds) {
     if (beatDurationSeconds <= 0) return true;
-    return elapsedSeconds / beatDurationSeconds >= 1;
+    return elapsedSeconds / beatDurationSeconds >= CHARGE_WINDOW_FRACTION;
 }
 
-/** True during the brief red-flash window just after crossing one beat. */
+/** True during the brief red-flash window just after crossing the charge window. */
 export function chargeInCancelFlash(elapsedSeconds, beatDurationSeconds) {
     if (beatDurationSeconds <= 0) return false;
     const fraction = elapsedSeconds / beatDurationSeconds;
-    return fraction >= 1 && fraction < 1 + CANCEL_FLASH_FRACTION;
+    return fraction >= CHARGE_WINDOW_FRACTION && fraction < CHARGE_WINDOW_FRACTION + CANCEL_FLASH_FRACTION;
 }
 
 /** True once the hold is past the red-flash window - wedge hidden, release still cancels. */
 export function chargeWedgeHidden(elapsedSeconds, beatDurationSeconds) {
     if (beatDurationSeconds <= 0) return true;
-    return elapsedSeconds / beatDurationSeconds >= 1 + CANCEL_FLASH_FRACTION;
+    return elapsedSeconds / beatDurationSeconds >= CHARGE_WINDOW_FRACTION + CANCEL_FLASH_FRACTION;
 }

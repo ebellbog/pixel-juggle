@@ -4,7 +4,7 @@ import JugglingSimulator from './JugglingSimulator.js';
 import Renderer from './Renderer.js';
 import Game from './Game.js';
 
-const DEFAULT_BPM = 100;
+const DEFAULT_BPM = 60;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 
 /**

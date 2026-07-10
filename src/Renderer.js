@@ -142,16 +142,17 @@ export default class Renderer {
      * a vertical line into a crossing half and a self half, each further divided into concentric rings - one per
      * available height, closest-to-vertex first - labeled with that
      * height's number. Whichever half matches the button being held lights
-     * up rings cumulatively as the beat windows advance; hold past a full
-     * beat and the whole wedge flashes red briefly, then hides - release
-     * after one beat still cancels the throw.
+     * height's number. White while charging (release inside the charge window
+     * to lock, or hold through the beat if the window hasn't expired), yellow
+     * after release (locked until the beat), then a brief green or red flash
+     * when the beat lands.
      *
      * Sized and anchored in fixed screen pixels rather than world units, on
      * purpose - like the beat bar, this is HUD, not part of the simulated
      * scene, so it should read the same size regardless of how zoomed in
      * the current pattern's geometry happens to be.
      */
-    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, activeSide, litRings, cancelFlash }) {
+    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, activeSide, litRings, cancelFlash, locked, beatFlash }) {
         const ctx = this.ctx;
         // Screen-space HUD: nudged outward and upward from the hand so it
         // doesn't compete with balls, queues, or ghost paths, and can be
@@ -168,18 +169,19 @@ export default class Renderer {
         const leftAngle = upAngle - halfAngle;
         const rightAngle = upAngle + halfAngle;
 
-        // Crossing throws travel toward the other hand, i.e. toward screen
-        // center; self throws stay put, i.e. away from center. So whichever
-        // half of the wedge points inward (toward center) is the crossing
-        // side - the right half for the left hand, the left half for the
-        // right hand.
         const angleRanges = hand === 'L'
             ? { cross: [upAngle, rightAngle], self: [leftAngle, upAngle] }
             : { cross: [leftAngle, upAngle], self: [upAngle, rightAngle] };
 
+        const flashColors = {
+            green: { fill: 'rgba(60, 190, 80, 0.92)', stroke: 'rgba(160, 255, 170, 0.95)', text: '#111' },
+            red: { fill: 'rgba(210, 50, 50, 0.92)', stroke: 'rgba(255, 120, 120, 0.95)', text: '#fff' },
+        };
+        const flashStyle = beatFlash ? flashColors[beatFlash] : null;
+
         ctx.save();
         ctx.lineWidth = 1;
-        ctx.strokeStyle = cancelFlash ? 'rgba(255, 120, 120, 0.95)' : 'rgba(255, 255, 255, 0.9)';
+        ctx.strokeStyle = flashStyle?.stroke ?? (cancelFlash ? 'rgba(255, 120, 120, 0.95)' : 'rgba(255, 255, 255, 0.9)');
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '16px sans-serif';
@@ -199,8 +201,12 @@ export default class Renderer {
                 ctx.arc(cx, cy, r0, endAngle, startAngle, true);
                 ctx.closePath();
 
-                if (cancelFlash) {
+                if (flashStyle) {
+                    ctx.fillStyle = lit ? flashStyle.fill : 'rgba(0, 0, 0, 0.35)';
+                } else if (cancelFlash) {
                     ctx.fillStyle = 'rgba(210, 50, 50, 0.92)';
+                } else if (lit && locked) {
+                    ctx.fillStyle = `rgba(240, 210, 50, ${Math.max(0.45, 1 - ring * 0.15).toFixed(3)})`;
                 } else if (lit) {
                     ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0.4, 1 - ring * 0.15).toFixed(3)})`;
                 } else {
@@ -211,7 +217,15 @@ export default class Renderer {
 
                 const midAngle = (startAngle + endAngle) / 2;
                 const midR = (r0 + r1) / 2;
-                ctx.fillStyle = cancelFlash ? '#fff' : (lit ? '#111' : '#fff');
+                if (flashStyle) {
+                    ctx.fillStyle = lit ? flashStyle.text : '#fff';
+                } else if (cancelFlash) {
+                    ctx.fillStyle = '#fff';
+                } else if (lit) {
+                    ctx.fillStyle = locked ? '#111' : '#111';
+                } else {
+                    ctx.fillStyle = '#fff';
+                }
                 ctx.fillText(
                     String(heights[ring]),
                     cx + Math.cos(midAngle) * midR,

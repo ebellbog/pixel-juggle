@@ -37,6 +37,45 @@ export default class Renderer {
             centerX: (extent.minX + extent.maxX) / 2,
             centerY: (extent.minY + extent.maxY) / 2,
         };
+        this.extent = extent;
+    }
+
+    /**
+     * Screen position for a hand's throw-height wedge. Horizontally, the
+     * wedge vertex (`cx`) sits halfway between that side of the screen and
+     * the live juggling area's edge (see `jugglingBounds` from Game.draw -
+     * *not* the padded camera-fit extent, which includes empty worst-case
+     * queue margin and would shove wedges toward the bezel). Capped on
+     * ultrawide layouts (see WEDGE_MAX_OFFSET_FROM_CENTER). Vertically,
+     * nudged upward from the hand anchor.
+     */
+    wedgeScreenPosition(hand, handAnchor, jugglingBounds) {
+        const WEDGE_OFFSET_Y = 80;
+        if (!jugglingBounds) {
+            const WEDGE_OFFSET_X = 110;
+            return {
+                cx: handAnchor.x + (hand === 'L' ? -WEDGE_OFFSET_X : WEDGE_OFFSET_X),
+                cy: handAnchor.y - WEDGE_OFFSET_Y,
+            };
+        }
+
+        const WEDGE_EDGE_INSET = 16;
+        const WEDGE_MAX_OFFSET_FROM_CENTER = 500;
+
+        const screenLeft = WEDGE_EDGE_INSET;
+        const screenRight = this.cssWidth - WEDGE_EDGE_INSET;
+        const centerX = this.cssWidth / 2;
+
+        let cx;
+        if (hand === 'L') {
+            const ideal = (screenLeft + jugglingBounds.left) / 2;
+            cx = Math.max(ideal, centerX - WEDGE_MAX_OFFSET_FROM_CENTER);
+        } else {
+            const ideal = (jugglingBounds.right + screenRight) / 2;
+            cx = Math.min(ideal, centerX + WEDGE_MAX_OFFSET_FROM_CENTER);
+        }
+
+        return { cx, cy: handAnchor.y - WEDGE_OFFSET_Y };
     }
 
     worldToScreen(x, y) {
@@ -131,13 +170,15 @@ export default class Renderer {
         }
 
         if (state.wedges) {
-            for (const wedge of state.wedges) this.drawThrowHeightWedge(wedge);
+            for (const wedge of state.wedges) {
+                this.drawThrowHeightWedge(wedge, state.jugglingBounds);
+            }
         }
     }
 
     /**
-     * The throw-height selector that appears while a throw button is held:
-     * a quarter-circle fan opening straight up, anchored in screen space
+     * The throw-height selector, always visible for both hands: a
+     * quarter-circle fan opening straight up, anchored in screen space
      * just outside and above each hand (see drawThrowHeightWedge), split by
      * a vertical line into a crossing half and a self half, each further divided into concentric rings - one per
      * available height, closest-to-vertex first - labeled with that
@@ -145,24 +186,33 @@ export default class Renderer {
      * height's number. White while charging (release inside the charge window
      * to lock, or hold through the beat if the window hasn't expired), yellow
      * after release (locked until the beat), then a brief green or red flash
-     * when the beat lands.
+     * when the beat lands. Fully unlit whenever nothing is charging/locked/
+     * flashing, rather than disappearing, so the player can watch it ahead
+     * of a press (see Game.buildWedgeState).
      *
-     * Sized and anchored in fixed screen pixels rather than world units, on
-     * purpose - like the beat bar, this is HUD, not part of the simulated
-     * scene, so it should read the same size regardless of how zoomed in
-     * the current pattern's geometry happens to be.
+     * The small circle sitting in the vertex gap below the innermost ring is
+     * the target indicator (`target`): a dotted outline if this hand has no
+     * ball and none will land in time, or a circle filled/outlined in that
+     * ball's color once there's one to throw - letting the player judge
+     * whether (and which ball) pressing now would actually launch, which
+     * matters most for a ball that's still mid-flight toward this hand.
+     *
+     * Sized in fixed screen pixels rather than world units, on purpose -
+     * like the beat bar, this is HUD, not part of the simulated scene.
+     * Horizontal placement is derived from the live juggling bounds passed
+     * in each frame (see Game.computeJugglingScreenBounds) so each wedge
+     * vertex sits halfway between the screen edge and where balls/paths
+     * actually are - not the padded camera-fit extent.
+     * ring geometry itself stays a constant pixel size regardless of zoom.
      */
-    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, activeSide, litRings, cancelFlash, locked, beatFlash }) {
+    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, activeSide, litRings, cancelFlash, locked, beatFlash, target }, jugglingBounds) {
         const ctx = this.ctx;
-        // Screen-space HUD: nudged outward and upward from the hand so it
-        // doesn't compete with balls, queues, or ghost paths, and can be
-        // sized generously without the two wedges meeting in the middle.
-        const WEDGE_OFFSET_X = 110;
-        const WEDGE_OFFSET_Y = 80;
-        const cx = anchor.x + (hand === 'L' ? -WEDGE_OFFSET_X : WEDGE_OFFSET_X);
-        const cy = anchor.y - WEDGE_OFFSET_Y;
+        const { cx, cy } = this.wedgeScreenPosition(hand, anchor, jugglingBounds);
 
         const innerRadius = 28;
+        // Smaller than innerRadius so the target indicator sits entirely
+        // within the vertex gap, never touching the innermost ring.
+        const targetRadius = innerRadius - 6;
         const ringThickness = 40;
         const halfAngle = Math.PI / 4; // 45 degrees either side of vertical.
         const upAngle = -Math.PI / 2; // Canvas angle for "straight up" from the anchor.
@@ -231,6 +281,30 @@ export default class Renderer {
                     cx + Math.cos(midAngle) * midR,
                     cy + Math.sin(midAngle) * midR,
                 );
+            }
+        }
+
+        if (target) {
+            const TARGET_FILL_ALPHA = 0.32;
+            const TARGET_STROKE_ALPHA = 0.55;
+            const TARGET_EMPTY_ALPHA = 0.5;
+
+            ctx.beginPath();
+            ctx.arc(cx, cy, targetRadius, 0, Math.PI * 2);
+            if (target.valid) {
+                ctx.globalAlpha = TARGET_FILL_ALPHA;
+                ctx.fillStyle = target.color;
+                ctx.fill();
+                ctx.globalAlpha = TARGET_STROKE_ALPHA;
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = target.color;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            } else {
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+                ctx.strokeStyle = `rgba(255, 255, 255, ${TARGET_EMPTY_ALPHA})`;
+                ctx.stroke();
             }
         }
 

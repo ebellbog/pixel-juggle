@@ -11,16 +11,26 @@ export const CANCEL_FLASH_FRACTION = 0.20;
  * The two height "ladders" a player can pick from with a held throw, given
  * the tallest throw this siteswap ever calls for. Crossing throws only ever
  * land on odd heights (1, 3, 5, ...) and self throws only on even ones
- * (2, 4, ...) under the usual alternating-hands convention, so the two
- * ladders are just those parities up to maxHeight - independent of whether
- * the pattern actually uses every one of them, since the player should be
- * able to practice any height up to the pattern's own ceiling.
+ * (2, 4, ...) under the usual alternating-hands convention. Each ladder
+ * includes every height of its parity up to maxHeight; if that leaves one
+ * side with fewer rings than the other (e.g. max height 3 → cross has 1 &
+ * 3 but self only has 2), the shorter side is extended with the next
+ * heights in its parity so both wedges always show the same ring count.
  */
 export function getAvailableHeights(maxHeight) {
     const crossHeights = [];
     for (let h = 1; h <= maxHeight; h += 2) crossHeights.push(h);
     const selfHeights = [];
     for (let h = 2; h <= maxHeight; h += 2) selfHeights.push(h);
+
+    const ringCount = Math.max(crossHeights.length, selfHeights.length);
+    while (crossHeights.length < ringCount) {
+        crossHeights.push(crossHeights[crossHeights.length - 1] + 2);
+    }
+    while (selfHeights.length < ringCount) {
+        selfHeights.push(selfHeights.length === 0 ? 2 : selfHeights[selfHeights.length - 1] + 2);
+    }
+
     return { crossHeights, selfHeights };
 }
 

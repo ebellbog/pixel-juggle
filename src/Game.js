@@ -42,6 +42,16 @@ const BEAT_FLASH_MS = 180;
  * beat both cancel. On the beat, a successful throw flashes green; an empty
  * hand or cancelled attempt flashes red. Each beat attempt requires a fresh
  * key press afterward; pressing while yellow resets to a fresh charge.
+ *
+ * Both hands' wedges stay on screen at all times (see buildWedgeState), not
+ * just while charging, so the player can watch them ahead of a press. Each
+ * also shows a target-ball indicator at its vertex (see computeTargetState/
+ * Renderer.drawThrowHeightWedge): a dotted outline if this hand has no ball
+ * and none will land in time for the very next beat, or a filled circle in
+ * that ball's color once one is either already queued or about to land.
+ * Pressing the throw button with no valid target shows a red danger state
+ * on that wedge for as long as the key stays held (see dangerHold), rather
+ * than starting a charge that could never succeed.
  */
 export default class Game {
     constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap }) {
@@ -100,6 +110,9 @@ export default class Game {
         // Brief green/red wedge flash after a beat-boundary throw attempt -
         // { color, wallTime, crossing, litRings } or null.
         this.beatFlash = { L: null, R: null };
+        // Per-hand red danger hold when the throw key is down but no ball is
+        // targeted - { crossing } or null (see handleThrowStart/Release).
+        this.dangerHold = { L: null, R: null };
 
         this.inputSchemes = [new KeyboardInput({
             onThrowStart: (intent) => this.handleThrowStart(intent),
@@ -167,14 +180,48 @@ export default class Game {
     /**
      * Starts charging a throw for `hand`. If a yellow locked throw is
      * already waiting on this hand, pressing again clears it and starts
-     * fresh from the lowest height.
+     * fresh from the lowest height. If this hand has no ball queued and
+     * none will land in time for the throw to resolve (see
+     * computeTargetState), there's nothing to throw even in principle, so
+     * the wedge shows red for as long as the key stays held (see
+     * dangerHold) instead of charging up to a throw that's certain to fail.
      */
     handleThrowStart({ hand, crossing }) {
         if (this.lockedThrow[hand]) this.lockedThrow[hand] = null;
         if (this.charging[hand]) return;
         const heights = crossing ? this.crossHeights : this.selfHeights;
         if (heights.length === 0) return;
+
+        if (!this.computeTargetState(hand).valid) {
+            this.dangerHold[hand] = { crossing };
+            return;
+        }
+
+        this.dangerHold[hand] = null;
         this.charging[hand] = { crossing, startWallTime: performance.now() };
+    }
+
+    /**
+     * Which ball (if any) `hand`'s next throw would send flying: the
+     * innermost queued ball if it's already holding one, or - if not - the
+     * soonest-landing in-flight ball destined for it, but only if that
+     * landing arrives by the very next beat boundary (this.nextBeatTime),
+     * i.e. in time for a throw started right now to actually resolve. Used
+     * both for the wedge's target indicator (see Renderer) and to reject a
+     * throw attempt immediately when there's no such ball (see
+     * handleThrowStart).
+     */
+    computeTargetState(hand) {
+        if (this.queues[hand].length > 0) {
+            return { valid: true, color: this.queues[hand][0].color };
+        }
+        let soonest = null;
+        for (const entry of this.inFlight) {
+            if (entry.destHand !== hand) continue;
+            if (entry.flight.endTime > this.nextBeatTime + LANDING_EPSILON) continue;
+            if (!soonest || entry.flight.endTime < soonest.flight.endTime) soonest = entry;
+        }
+        return soonest ? { valid: true, color: soonest.ball.color } : { valid: false, color: null };
     }
 
     /**
@@ -196,8 +243,15 @@ export default class Game {
         };
     }
 
-    /** Locks in height on release (yellow wedge); throw waits for beat boundary. */
+    /** Locks in height on release (yellow wedge), or clears a danger hold. */
     handleThrowRelease({ hand, crossing }) {
+        const danger = this.dangerHold[hand];
+        if (danger && danger.crossing === crossing) {
+            this.dangerHold[hand] = null;
+            this.draw();
+            return;
+        }
+
         const charge = this.charging[hand];
         if (!charge || charge.crossing !== crossing) return;
         const state = this.getChargeState(hand);
@@ -440,28 +494,67 @@ export default class Game {
         const wedges = [];
         for (const hand of ['L', 'R']) {
             const anchor = this.renderer.worldToScreen(this.physics.hands[hand].outerX, this.physics.handY);
-            const wedge = this.buildWedgeState(hand, anchor);
-            if (wedge) wedges.push(wedge);
+            wedges.push(this.buildWedgeState(hand, anchor));
         }
+
+        const staticPaths = this.paths.map((path) => ({
+            points: path.points,
+            highlighted: path.beat === this.beatIndex,
+        }));
 
         this.renderer.draw({
             balls,
-            staticPaths: this.paths.map((path) => ({
-                points: path.points,
-                highlighted: path.beat === this.beatIndex,
-            })),
+            staticPaths,
             ballRadius: this.ballRadius,
             wedges,
+            jugglingBounds: this.computeJugglingScreenBounds(balls, staticPaths),
         });
     }
 
-    /** Wedge HUD state for one hand - beat flash, yellow lock, or white charge. */
+    /**
+     * Horizontal screen edges of what's actually on screen right now - hands,
+     * live balls, and ghost paths - for wedge placement. Kept separate from
+     * this.extent, which is padded for worst-case queue growth and camera
+     * fit only (see buildExtent).
+     */
+    computeJugglingScreenBounds(balls, staticPaths) {
+        const p = this.physics;
+        let minX = p.hands.L.outerX;
+        let maxX = p.hands.R.outerX;
+
+        for (const ball of balls) {
+            minX = Math.min(minX, ball.x - ball.radius);
+            maxX = Math.max(maxX, ball.x + ball.radius);
+        }
+        for (const entry of staticPaths) {
+            for (const point of entry.points) {
+                minX = Math.min(minX, point.x);
+                maxX = Math.max(maxX, point.x);
+            }
+        }
+
+        const y = p.handY;
+        return {
+            left: this.renderer.worldToScreen(minX, y).x,
+            right: this.renderer.worldToScreen(maxX, y).x,
+        };
+    }
+
+    /**
+     * Wedge HUD state for one hand - always returned (see class doc) so both
+     * wedges stay visible even with nothing going on: beat flash, yellow
+     * lock, white charge, or (falling through every one of those) a fully
+     * unlit idle wedge. `target` is attached regardless of state, since the
+     * target indicator is meant to be watched independent of whether a
+     * throw is currently being charged.
+     */
     buildWedgeState(hand, anchor) {
         const base = {
             hand,
             anchor,
             crossHeights: this.crossHeights,
             selfHeights: this.selfHeights,
+            target: this.computeTargetState(hand),
         };
 
         const flash = this.beatFlash[hand];
@@ -471,6 +564,17 @@ export default class Game {
                 activeSide: flash.crossing ? 'cross' : 'self',
                 litRings: flash.litRings,
                 beatFlash: flash.color,
+            };
+        }
+
+        const danger = this.dangerHold[hand];
+        if (danger) {
+            const heights = danger.crossing ? this.crossHeights : this.selfHeights;
+            return {
+                ...base,
+                activeSide: danger.crossing ? 'cross' : 'self',
+                litRings: heights.length,
+                beatFlash: 'red',
             };
         }
 
@@ -485,15 +589,22 @@ export default class Game {
         }
 
         const charge = this.charging[hand];
-        if (!charge) return null;
-        const state = this.getChargeState(hand);
-        if (state.wedgeHidden) return null;
-        return {
-            ...base,
-            activeSide: charge.crossing ? 'cross' : 'self',
-            litRings: state.litRings,
-            cancelFlash: state.cancelFlash,
-        };
+        if (charge) {
+            const state = this.getChargeState(hand);
+            // Past the cancel-flash window, a still-held key shows nothing
+            // until release + a fresh press (see resolveBeatThrow) - same
+            // idle appearance as the no-charge case below.
+            if (!state.wedgeHidden) {
+                return {
+                    ...base,
+                    activeSide: charge.crossing ? 'cross' : 'self',
+                    litRings: state.litRings,
+                    cancelFlash: state.cancelFlash,
+                };
+            }
+        }
+
+        return { ...base, activeSide: null, litRings: 0 };
     }
 
     /** Re-fit and redraw against the same fixed geometry (e.g. on resize). */
@@ -511,6 +622,7 @@ export default class Game {
         this.charging = { L: null, R: null };
         this.lockedThrow = { L: null, R: null };
         this.beatFlash = { L: null, R: null };
+        this.dangerHold = { L: null, R: null };
         this.$beatBarWrap.addClass('hidden');
     }
 }

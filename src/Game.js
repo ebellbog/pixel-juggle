@@ -3,19 +3,15 @@ import Ball from './Ball.js';
 import Throw from './Throw.js';
 import KeyboardInput from './KeyboardInput.js';
 import { queueSlotPosition, queueSlotIndexForRender, QUEUE_SPACING_RADII } from './HandQueue.js';
+import { getAvailableHeights, computeLitRings, chargePastCancelThreshold, chargeInCancelFlash, chargeWedgeHidden } from './ThrowHeight.js';
 
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 
-// How long (wall-clock ms) to honor a throw press that arrived while the
-// hand's queue was still empty - e.g. the player hit the button just before
-// the inbound ball landed. Checked when a ball becomes available (see
+// How long (wall-clock ms) to honor a throw release that arrived while the
+// hand's queue was still empty - e.g. the player released just before the
+// inbound ball landed. Checked when a ball becomes available (see
 // tryPendingThrow).
 const THROW_GRACE_MS = 160;
-
-// Fixed heights for manually-thrown balls, until player-controlled height
-// (held-key duration, discretized or continuous) is wired up.
-const SELF_THROW_HEIGHT = 2;
-const CROSS_THROW_HEIGHT = 3;
 
 /**
  * Everything that happens once the player commits to "Let me try!": the
@@ -36,6 +32,12 @@ const CROSS_THROW_HEIGHT = 3;
  * the far ("outermost") end; throwing removes from the near end. Only the
  * innermost ball's position ever matters for continuity; the rest of the
  * queue is purely cosmetic bookkeeping (see queuePosition).
+ *
+ * Throw height is chosen by how long the throw button is held (see
+ * this.charging): pressing starts a charge for that hand, releasing within
+ * one beat fires at whichever height window was active (see
+ * ThrowHeight.computeLitRings). Hold past a full beat and the throw is
+ * cancelled on release, after a brief red flash on the wedge UI.
  */
 export default class Game {
     constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap }) {
@@ -54,6 +56,12 @@ export default class Game {
         this.period = this.physics.period;
         this.ballRadius = this.physics.ballRadius;
         this.extent = this.buildExtent();
+        // The two height "ladders" (crossing: odd, self: even) a held throw
+        // can select from, capped at whatever this pattern's tallest throw
+        // is - see ThrowHeight and this.charging below.
+        const { crossHeights, selfHeights } = getAvailableHeights(this.physics.getMaxHeight());
+        this.crossHeights = crossHeights;
+        this.selfHeights = selfHeights;
 
         // Beat bar and ghost-path highlight are driven off this one clock,
         // so dragging the BPM slider can't leave them out of sync with each
@@ -72,15 +80,21 @@ export default class Game {
         this.inFlight = [];
         this.queues = this.buildInitialQueues();
         // Per-hand inward-shift window for the live queue - set when the
-        // innermost ball is thrown (handleThrowInput) and read when laying
+        // innermost ball is thrown (executeThrow) and read when laying
         // out the queue (draw).
         this.queueShiftStart = { L: -Infinity, R: -Infinity };
         this.queueShiftUntil = { L: -Infinity, R: -Infinity };
         // Per-hand throw intent that didn't fire because the queue was empty
-        // - { crossing, wallTime } or null (see handleThrowInput/tryPendingThrow).
+        // - { crossing, height, wallTime } or null (see attemptThrow/tryPendingThrow).
         this.pendingThrow = { L: null, R: null };
+        // Per-hand in-progress button hold - { crossing, startWallTime } or
+        // null (see handleThrowStart/handleThrowRelease/getChargeState).
+        this.charging = { L: null, R: null };
 
-        this.inputSchemes = [new KeyboardInput((intent) => this.handleThrowInput(intent))];
+        this.inputSchemes = [new KeyboardInput({
+            onThrowStart: (intent) => this.handleThrowStart(intent),
+            onThrowRelease: (intent) => this.handleThrowRelease(intent),
+        })];
 
         this.rafId = null;
         this.lastTimestamp = 0;
@@ -134,28 +148,75 @@ export default class Game {
     }
 
     setBpm(bpm) {
-        // Keeps this.physics.timeScale current - both the beat cue below and
-        // manual throws (see handleThrowInput/tick) read tempo through it.
+        // Keeps this.physics.timeScale current - both the beat cue and any
+        // in-progress charge's timing (see getChargeState) read tempo
+        // through it.
         this.physics.setBpm(bpm);
     }
 
     /**
-     * A hand can only throw a ball it's actually holding - i.e. its queue
-     * isn't empty. Throwing removes the innermost (index 0) ball and gives
-     * it a Throw identical in kind to a scripted one: same carry-then-flight
-     * geometry, same fixed heights' worth of arc, starting from this ball's
-     * current rest velocity (whatever it landed with if it's fresh off a
-     * catch - see Ball.restVelocity, or the pattern's steady-state landing
-     * velocity for a never-flown ball - see getSteadyStateIncoming) so the
-     * carry curve continues smoothly and first throws match the ghost paths.
+     * Starts charging a throw for `hand`: the height it'll actually launch
+     * at is only decided on release (see handleThrowRelease), based on how
+     * long it was held. A second press on the same hand while one's already
+     * charging is ignored - only one throw can be in flight from a hand's
+     * queue at a time anyway. Also ignored if this side has no valid height
+     * at all (e.g. a self throw when the pattern's tallest throw is only 1).
      */
-    handleThrowInput({ hand, crossing }) {
-        if (this.queues[hand].length === 0) {
-            this.pendingThrow[hand] = { crossing, wallTime: performance.now() };
+    handleThrowStart({ hand, crossing }) {
+        if (this.charging[hand]) return;
+        const heights = crossing ? this.crossHeights : this.selfHeights;
+        if (heights.length === 0) return;
+        this.charging[hand] = { crossing, startWallTime: performance.now() };
+    }
+
+    /**
+     * Timing state for an in-progress charge: how many rings are lit,
+     * whether the hold has crossed a full beat (cancel on release), whether
+     * we're in the brief red-flash window, and whether the wedge is hidden.
+     */
+    getChargeState(hand) {
+        const charge = this.charging[hand];
+        if (!charge) return null;
+        const heights = charge.crossing ? this.crossHeights : this.selfHeights;
+        const elapsedSeconds = (performance.now() - charge.startWallTime) / 1000;
+        const beatDurationSeconds = 60 / this.physics.bpm;
+        return {
+            litRings: computeLitRings(heights.length, elapsedSeconds, beatDurationSeconds),
+            cancelled: chargePastCancelThreshold(elapsedSeconds, beatDurationSeconds),
+            cancelFlash: chargeInCancelFlash(elapsedSeconds, beatDurationSeconds),
+            wedgeHidden: chargeWedgeHidden(elapsedSeconds, beatDurationSeconds),
+        };
+    }
+
+    /** Stops charging `hand` - fires the throw if still within one beat, otherwise cancels. */
+    handleThrowRelease({ hand, crossing }) {
+        const charge = this.charging[hand];
+        if (!charge || charge.crossing !== crossing) return;
+        const state = this.getChargeState(hand);
+        this.charging[hand] = null;
+        if (state.cancelled) {
+            this.draw();
             return;
         }
+        const heights = crossing ? this.crossHeights : this.selfHeights;
+        const height = heights[state.litRings - 1];
+        this.attemptThrow(hand, crossing, height);
+        this.draw();
+    }
+
+    /**
+     * A hand can only throw a ball it's actually holding - i.e. its queue
+     * isn't empty. If it's empty right now, buffers the intent (including
+     * the already-chosen height) in case a ball lands within the grace
+     * window (see tryPendingThrow).
+     */
+    attemptThrow(hand, crossing, height) {
         this.pendingThrow[hand] = null;
-        this.executeThrow(hand, crossing);
+        if (this.queues[hand].length === 0) {
+            this.pendingThrow[hand] = { crossing, height, wallTime: performance.now() };
+            return;
+        }
+        this.executeThrow(hand, crossing, height);
     }
 
     /** Drops any pending throw whose grace window has expired. */
@@ -170,8 +231,9 @@ export default class Game {
     }
 
     /**
-     * If the player pressed throw for `hand` just before a ball landed,
-     * fire that buffered intent now that the queue has a ball again.
+     * If the player released throw for `hand` just before a ball landed,
+     * fire that buffered intent - at its already-chosen height - now that
+     * the queue has a ball again.
      */
     tryPendingThrow(hand) {
         const pending = this.pendingThrow[hand];
@@ -181,10 +243,18 @@ export default class Game {
             return;
         }
         this.pendingThrow[hand] = null;
-        this.executeThrow(hand, pending.crossing);
+        this.executeThrow(hand, pending.crossing, pending.height);
     }
 
-    executeThrow(hand, crossing) {
+    /**
+     * Throws the innermost ball in `hand`'s queue, identically to a scripted
+     * throw: same carry-then-flight geometry, same rest-velocity-matching
+     * (whatever it landed with if it's fresh off a catch - see
+     * Ball.restVelocity, or the pattern's steady-state landing velocity for
+     * a never-flown ball - see getSteadyStateIncoming) so the carry curve
+     * continues smoothly and first throws match the ghost paths.
+     */
+    executeThrow(hand, crossing, height) {
         const queue = this.queues[hand];
         if (queue.length === 0) return;
 
@@ -195,12 +265,9 @@ export default class Game {
             this.queueShiftUntil[hand] = this.time + this.physics.carryDuration;
         }
         const destHand = crossing ? this.physics.otherHand(hand) : hand;
-        const height = crossing ? CROSS_THROW_HEIGHT : SELF_THROW_HEIGHT;
         const p = this.physics;
 
-        const incomingVelocity = (ball.restVelocity.x !== 0 || ball.restVelocity.y !== 0)
-            ? ball.restVelocity
-            : p.getSteadyStateIncoming(hand, this.beatIndex);
+        const incomingVelocity = this.resolveIncomingVelocity(ball, hand, height);
 
         const flight = new Throw({
             ball,
@@ -216,7 +283,38 @@ export default class Game {
             incomingVelocity,
         });
 
-        this.inFlight.push({ flight, ball, destHand });
+        this.inFlight.push({ flight, ball, destHand, sourceHand: hand });
+    }
+
+    /**
+     * What incoming velocity the next carry from `hand` should start with.
+     * Landed balls reuse their actual rest velocity; never-flown balls fall
+     * back to the ghost-path steady state for the current beat, and if that
+     * beat's slot is empty ({0, 0} - the hand doesn't throw then, or the
+     * player is off-beat) to a typical catch speed harvested from whichever
+     * beat in the pattern gives the steepest scoop for this hand.
+     *
+     * Height-1 throws are a special case: they land with a much shallower
+     * vertical speed than taller throws, so feeding that rest velocity
+     * straight back into the next 1 makes the carry look flat even though
+     * the hand should still recoil. When chaining 1s, keep the actual
+     * horizontal catch momentum but borrow the pattern's usual downward
+     * recoil on the vertical axis (see height check below).
+     */
+    resolveIncomingVelocity(ball, hand, height) {
+        const typical = this.physics.getTypicalSteadyStateIncoming(hand);
+
+        if (ball.restVelocity.x === 0 && ball.restVelocity.y === 0) {
+            const atBeat = this.physics.getSteadyStateIncoming(hand, this.beatIndex);
+            if (atBeat.x !== 0 || atBeat.y !== 0) return atBeat;
+            return typical;
+        }
+
+        const rest = ball.restVelocity;
+        if (height === 1 && typical.y < 0 && rest.y > typical.y) {
+            return { x: rest.x, y: typical.y };
+        }
+        return rest;
     }
 
     /** Lands any manually-thrown ball whose flight has finished by now, into the outer end of its destination hand's queue. */
@@ -236,8 +334,19 @@ export default class Game {
         const dt = Math.min((timestamp - this.lastTimestamp) / 1000, MAX_FRAME_DT);
         this.lastTimestamp = timestamp;
 
-        this.time += dt * this.physics.timeScale;
-        this.resolveLandings();
+        // Sub-step so a single long frame (tab backgrounded, hitch) can't
+        // leap past a throw's whole carry phase - especially noticeable on
+        // low "1" throws, where carry is a large share of a short duration
+        // and the ball never leaves the hand region.
+        const delta = dt * this.physics.timeScale;
+        const maxStep = this.physics.carryDuration / 8;
+        let remaining = delta;
+        while (remaining > 0) {
+            const step = Math.min(maxStep, remaining);
+            this.time += step;
+            this.resolveLandings();
+            remaining -= step;
+        }
         this.expirePendingThrows();
 
         const beatDuration = 60 / this.physics.bpm;
@@ -257,9 +366,21 @@ export default class Game {
         this.$beatBar.css('transform', `scaleX(${1 - beatProgress})`);
 
         const balls = [];
+        const carryingFrom = { L: false, R: false };
+        for (const entry of this.inFlight) {
+            if (entry.sourceHand && this.time - entry.flight.startTime < entry.flight.carryDuration) {
+                carryingFrom[entry.sourceHand] = true;
+            }
+        }
         for (const hand of ['L', 'R']) {
             const queue = this.queues[hand];
             for (let i = 0; i < queue.length; i++) {
+                // While a ball is still in its carry phase, hide the
+                // innermost queued ball sliding into the catch spot -
+                // otherwise a low "1" throw (which never leaves the hand
+                // region) can look like the queue ball doing a flat slide
+                // with no scoop.
+                if (i === 0 && carryingFrom[hand]) continue;
                 const slot = queueSlotIndexForRender(
                     i, this.time, this.queueShiftStart[hand], this.queueShiftUntil[hand],
                 );
@@ -272,6 +393,24 @@ export default class Game {
             balls.push({ x: pos.x, y: pos.y, radius: this.ballRadius, color: entry.ball.color });
         }
 
+        const wedges = [];
+        for (const hand of ['L', 'R']) {
+            const charge = this.charging[hand];
+            if (!charge) continue;
+            const anchor = this.renderer.worldToScreen(this.physics.hands[hand].outerX, this.physics.handY);
+            const state = this.getChargeState(hand);
+            if (state.wedgeHidden) continue;
+            wedges.push({
+                hand,
+                anchor,
+                crossHeights: this.crossHeights,
+                selfHeights: this.selfHeights,
+                activeSide: charge.crossing ? 'cross' : 'self',
+                litRings: state.litRings,
+                cancelFlash: state.cancelFlash,
+            });
+        }
+
         this.renderer.draw({
             balls,
             staticPaths: this.paths.map((path) => ({
@@ -279,6 +418,7 @@ export default class Game {
                 highlighted: path.beat === this.beatIndex,
             })),
             ballRadius: this.ballRadius,
+            wedges,
         });
     }
 
@@ -294,6 +434,7 @@ export default class Game {
             this.rafId = null;
         }
         for (const scheme of this.inputSchemes) scheme.detach();
+        this.charging = { L: null, R: null };
         this.$beatBarWrap.addClass('hidden');
     }
 }

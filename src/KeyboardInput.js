@@ -8,14 +8,17 @@ export const DEFAULT_KEY_BINDINGS = {
 };
 
 /**
- * Translates raw keydown events into hand-throw intents - plain
+ * Translates raw keydown/keyup events into hand-throw intents - plain
  * { hand: 'L'|'R', crossing: boolean } objects - the one shape every input
  * scheme (keyboard now; touch and gamepad later) reduces down to, so Game
- * never needs to know which scheme produced a given throw.
+ * never needs to know which scheme produced a given throw. Reports both the
+ * press (onThrowStart) and the release (onThrowRelease) since throw height
+ * is now determined by how long the button was held (see Game).
  */
 export default class KeyboardInput {
-    constructor(onThrow, bindings = DEFAULT_KEY_BINDINGS) {
-        this.onThrow = onThrow;
+    constructor({ onThrowStart, onThrowRelease }, bindings = DEFAULT_KEY_BINDINGS) {
+        this.onThrowStart = onThrowStart;
+        this.onThrowRelease = onThrowRelease;
         this.bindings = bindings;
         this.keysHeld = new Set();
         this.handleKeyDown = this.handleKeyDown.bind(this);
@@ -33,21 +36,31 @@ export default class KeyboardInput {
         this.keysHeld.clear();
     }
 
-    handleKeyDown(event) {
+    /** Finds which binding, if any, `key` matches. */
+    lookupBinding(key) {
         for (const hand of ['L', 'R']) {
             for (const crossing of [false, true]) {
-                const key = this.bindings[hand][crossing ? 'cross' : 'self'];
-                if (event.key === key) {
-                    if (this.keysHeld.has(key)) return;
-                    this.keysHeld.add(key);
-                    this.onThrow({ hand, crossing });
-                    return;
+                if (key === this.bindings[hand][crossing ? 'cross' : 'self']) {
+                    return { hand, crossing };
                 }
             }
         }
+        return null;
+    }
+
+    handleKeyDown(event) {
+        const intent = this.lookupBinding(event.key);
+        if (!intent) return;
+        // Ignore OS key-repeat while already held - a throw should only
+        // start charging once per physical press, not once per repeat event.
+        if (this.keysHeld.has(event.key)) return;
+        this.keysHeld.add(event.key);
+        this.onThrowStart(intent);
     }
 
     handleKeyUp(event) {
-        this.keysHeld.delete(event.key);
+        if (!this.keysHeld.delete(event.key)) return;
+        const intent = this.lookupBinding(event.key);
+        if (intent) this.onThrowRelease(intent);
     }
 }

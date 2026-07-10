@@ -129,5 +129,97 @@ export default class Renderer {
             ctx.fillStyle = ball.color;
             ctx.fill();
         }
+
+        if (state.wedges) {
+            for (const wedge of state.wedges) this.drawThrowHeightWedge(wedge);
+        }
+    }
+
+    /**
+     * The throw-height selector that appears while a throw button is held:
+     * a quarter-circle fan opening straight up, anchored in screen space
+     * just outside and above each hand (see drawThrowHeightWedge), split by
+     * a vertical line into a crossing half and a self half, each further divided into concentric rings - one per
+     * available height, closest-to-vertex first - labeled with that
+     * height's number. Whichever half matches the button being held lights
+     * up rings cumulatively as the beat windows advance; hold past a full
+     * beat and the whole wedge flashes red briefly, then hides - release
+     * after one beat still cancels the throw.
+     *
+     * Sized and anchored in fixed screen pixels rather than world units, on
+     * purpose - like the beat bar, this is HUD, not part of the simulated
+     * scene, so it should read the same size regardless of how zoomed in
+     * the current pattern's geometry happens to be.
+     */
+    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, activeSide, litRings, cancelFlash }) {
+        const ctx = this.ctx;
+        // Screen-space HUD: nudged outward and upward from the hand so it
+        // doesn't compete with balls, queues, or ghost paths, and can be
+        // sized generously without the two wedges meeting in the middle.
+        const WEDGE_OFFSET_X = 110;
+        const WEDGE_OFFSET_Y = 80;
+        const cx = anchor.x + (hand === 'L' ? -WEDGE_OFFSET_X : WEDGE_OFFSET_X);
+        const cy = anchor.y - WEDGE_OFFSET_Y;
+
+        const innerRadius = 28;
+        const ringThickness = 40;
+        const halfAngle = Math.PI / 4; // 45 degrees either side of vertical.
+        const upAngle = -Math.PI / 2; // Canvas angle for "straight up" from the anchor.
+        const leftAngle = upAngle - halfAngle;
+        const rightAngle = upAngle + halfAngle;
+
+        // Crossing throws travel toward the other hand, i.e. toward screen
+        // center; self throws stay put, i.e. away from center. So whichever
+        // half of the wedge points inward (toward center) is the crossing
+        // side - the right half for the left hand, the left half for the
+        // right hand.
+        const angleRanges = hand === 'L'
+            ? { cross: [upAngle, rightAngle], self: [leftAngle, upAngle] }
+            : { cross: [leftAngle, upAngle], self: [upAngle, rightAngle] };
+
+        ctx.save();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = cancelFlash ? 'rgba(255, 120, 120, 0.95)' : 'rgba(255, 255, 255, 0.9)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '16px sans-serif';
+
+        for (const side of ['cross', 'self']) {
+            const heights = side === 'cross' ? crossHeights : selfHeights;
+            const [startAngle, endAngle] = angleRanges[side];
+            const isActiveSide = activeSide === side;
+
+            for (let ring = 0; ring < heights.length; ring++) {
+                const r0 = innerRadius + ring * ringThickness;
+                const r1 = r0 + ringThickness;
+                const lit = !cancelFlash && isActiveSide && ring < litRings;
+
+                ctx.beginPath();
+                ctx.arc(cx, cy, r1, startAngle, endAngle);
+                ctx.arc(cx, cy, r0, endAngle, startAngle, true);
+                ctx.closePath();
+
+                if (cancelFlash) {
+                    ctx.fillStyle = 'rgba(210, 50, 50, 0.92)';
+                } else if (lit) {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0.4, 1 - ring * 0.15).toFixed(3)})`;
+                } else {
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+                }
+                ctx.fill();
+                ctx.stroke();
+
+                const midAngle = (startAngle + endAngle) / 2;
+                const midR = (r0 + r1) / 2;
+                ctx.fillStyle = cancelFlash ? '#fff' : (lit ? '#111' : '#fff');
+                ctx.fillText(
+                    String(heights[ring]),
+                    cx + Math.cos(midAngle) * midR,
+                    cy + Math.sin(midAngle) * midR,
+                );
+            }
+        }
+
+        ctx.restore();
     }
 }

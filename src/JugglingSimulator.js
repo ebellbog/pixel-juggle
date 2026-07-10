@@ -167,6 +167,31 @@ export default class JugglingSimulator {
     }
 
     /**
+     * A representative catch velocity for `hand` drawn from whichever beat
+     * in the pattern gives the steepest downward incoming speed. Used when
+     * the current beat's slot is {0, 0} - e.g. a hand that doesn't throw
+     * on this beat, or a ball's first launch before it's ever landed - so
+     * manual throws still get a visible recoil scoop instead of starting
+     * from a dead stop (see Game.resolveIncomingVelocity).
+     */
+    getTypicalSteadyStateIncoming(hand) {
+        this._ensureSteadyStateIncoming();
+        if (!this.steadyStateIncoming) return { x: 0, y: 0 };
+        let best = { x: 0, y: 0 };
+        let bestMag = 0;
+        for (let beat = 0; beat < this.period; beat++) {
+            const entry = this.steadyStateIncoming[beat]?.[hand];
+            if (!entry) continue;
+            const mag = Math.abs(entry.y);
+            if (mag > bestMag) {
+                best = { x: entry.x, y: entry.y };
+                bestMag = mag;
+            }
+        }
+        return best;
+    }
+
+    /**
      * Sets the tempo. This only changes how fast internal time advances - it
      * never touches beat spacing, gravity, or anything already in flight. So a
      * change mid-run is perfectly seamless: every ball simply continues along
@@ -479,14 +504,24 @@ export default class JugglingSimulator {
      * own regardless (see Game.buildExtent), so including this fixed,
      * schedule-derived term here too would just pad the same margin twice.
      */
-    getExtent({ includeSpawnQueue = true } = {}) {
+    /** The tallest throw (in beats) this pattern ever calls for, on either hand. */
+    getMaxHeight() {
         let maxHeight = 0;
+        for (const slot of this.slots) {
+            for (const throwSpec of [slot.R, slot.L]) {
+                if (throwSpec) maxHeight = Math.max(maxHeight, throwSpec.height);
+            }
+        }
+        return maxHeight;
+    }
+
+    getExtent({ includeSpawnQueue = true } = {}) {
+        const maxHeight = this.getMaxHeight();
         let maxDip = 0;
         for (const slot of this.slots) {
             for (const throwSpec of [slot.R, slot.L]) {
                 if (!throwSpec) continue;
                 const height = throwSpec.height;
-                maxHeight = Math.max(maxHeight, height);
                 // The recoil dip is driven by how steeply the ball was
                 // falling when caught (see Throw.carryPositionAt); estimate
                 // its size from this throw's own landing velocity as a

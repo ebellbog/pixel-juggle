@@ -106,6 +106,14 @@ export default class App {
         this.$patternSelectList.toggleClass('hidden', !open);
         this.$patternSelectWrap.toggleClass('open', open);
         this.$patternSelectTrigger.attr('aria-expanded', open ? 'true' : 'false');
+
+        // Otherwise, reopening after scrolling down to a lower option leaves
+        // the list scrolled to that spot, which can push the top options
+        // out of view (and out of easy reach) until the user scrolls back up.
+        if (open) {
+            const selected = this.$patternSelectList.find('.pattern-select-option.selected')[0];
+            (selected || this.$patternSelectList[0]).scrollIntoView({ block: 'nearest' });
+        }
     }
 
     setPatternValue(value) {
@@ -123,7 +131,7 @@ export default class App {
             this.$input.val(value);
             this.$patternSelectList
                 .find('.pattern-select-option')
-                .filter(function () { return $(this).data('value') === value; })
+                .filter(function () { return $(this).attr('data-value') === value; })
                 .addClass('selected');
         }
 
@@ -142,7 +150,11 @@ export default class App {
         });
 
         this.$patternSelectList.on('click', '.pattern-select-option', (event) => {
-            this.setPatternValue($(event.currentTarget).data('value'));
+            // .attr(), not .data() - jQuery's .data() silently coerces
+            // numeric-looking data-value strings (e.g. "51", "531") into
+            // real Numbers, which then fail the strict string comparisons
+            // in findPattern()/setPatternValue() below.
+            this.setPatternValue($(event.currentTarget).attr('data-value'));
         });
 
         $(document).on('click', () => this.setPatternListOpen(false));

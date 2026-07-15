@@ -27,6 +27,10 @@ export default class SyncSiteswap {
         this.numBalls = numBalls;
         this.isValid = isValid;
         this.error = error;
+        // See Siteswap.isSync - lets callers (e.g. Game/ThrowHeight) special-
+        // case sync's "every height is even, crossing is an independent 'x'"
+        // convention instead of vanilla's "crossing iff odd".
+        this.isSync = true;
     }
 
     static looksLikeSync(rawInput) {

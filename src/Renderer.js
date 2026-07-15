@@ -190,12 +190,20 @@ export default class Renderer {
      * flashing, rather than disappearing, so the player can watch it ahead
      * of a press (see Game.buildWedgeState).
      *
+     * Ring numbers normally rely on vanilla's odd-means-crossing convention
+     * to tell the two sides apart at a glance. Sync notation has no such
+     * link (every height is even on both sides - see
+     * ThrowHeight.getAvailableHeights), so when `sync` is set the cross
+     * side's labels get an explicit trailing 'x' instead (e.g. "4x"),
+     * matching sync notation itself.
+     *
      * The small circle sitting in the vertex gap below the innermost ring is
      * the target indicator (`target`): a dotted outline if this hand has no
      * ball and none will land in time, or a circle filled/outlined in that
      * ball's color once there's one to throw - letting the player judge
      * whether (and which ball) pressing now would actually launch, which
      * matters most for a ball that's still mid-flight toward this hand.
+     * "LEFT HAND" / "RIGHT HAND" labels sit just above the outermost ring.
      *
      * Sized in fixed screen pixels rather than world units, on purpose -
      * like the beat bar, this is HUD, not part of the simulated scene.
@@ -205,7 +213,7 @@ export default class Renderer {
      * actually are - not the padded camera-fit extent.
      * ring geometry itself stays a constant pixel size regardless of zoom.
      */
-    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, activeSide, litRings, cancelFlash, locked, beatFlash, target }, jugglingBounds) {
+    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, sync, activeSide, litRings, cancelFlash, locked, beatFlash, target }, jugglingBounds) {
         const ctx = this.ctx;
         const { cx, cy } = this.wedgeScreenPosition(hand, anchor, jugglingBounds);
 
@@ -214,6 +222,8 @@ export default class Renderer {
         // within the vertex gap, never touching the innermost ring.
         const targetRadius = innerRadius - 6;
         const ringThickness = 40;
+        const ringCount = Math.max(crossHeights.length, selfHeights.length);
+        const outerRadius = innerRadius + ringCount * ringThickness;
         const halfAngle = Math.PI / 4; // 45 degrees either side of vertical.
         const upAngle = -Math.PI / 2; // Canvas angle for "straight up" from the anchor.
         const leftAngle = upAngle - halfAngle;
@@ -276,13 +286,24 @@ export default class Renderer {
                 } else {
                     ctx.fillStyle = '#fff';
                 }
+                const label = sync && side === 'cross' ? `${heights[ring]}x` : String(heights[ring]);
                 ctx.fillText(
-                    String(heights[ring]),
+                    label,
                     cx + Math.cos(midAngle) * midR,
                     cy + Math.sin(midAngle) * midR,
                 );
             }
         }
+
+        ctx.font = '14px sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(
+            hand === 'L' ? 'LEFT HAND' : 'RIGHT HAND',
+            cx,
+            cy - outerRadius - 10,
+        );
 
         if (target) {
             const TARGET_FILL_ALPHA = 0.32;

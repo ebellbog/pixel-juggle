@@ -16,9 +16,27 @@ const BEAT_FLASH_MS = 180;
 
 /**
  * Everything that happens once the player commits to "Let me try!": the
- * static ghost-path preview/beat cue (unchanged from before), plus - new -
- * letting the player actually throw balls. Kept separate from App, which
- * just owns the page's idle-state chrome (see there).
+ * static ghost-path preview, plus letting the player actually throw balls.
+ * Kept separate from App, which just owns the page's idle-state chrome (see
+ * there).
+ *
+ * Exactly one *step* is highlighted at a time - whichever throw (or, for a
+ * synchronous pattern's beat-pairs, pair of throws - see
+ * buildThrowSequenceSteps) is next expected in the pattern's own order,
+ * tracked independent of the live beat clock (see
+ * throwSequenceIndex/recordThrowSequenceOutcome) rather than "whichever beat
+ * this is," so starting a beat late or making one mistake doesn't just
+ * permanently desync the cue from what the player is actually doing. Any
+ * wrong throw, an attempt that fails outright (empty hand,
+ * expired hold), or a catch landing on a hand that's still holding an
+ * unthrown ball (see resolveLandings - these patterns are never
+ * multiplexed, so that always means some earlier throw got skipped) hides
+ * the highlight until a full clean period brings it back - simply not
+ * pressing anything is never itself held against the player, since there's
+ * no fixed per-beat obligation here (see resolveBeatThrow). Before the
+ * player's first-ever match nothing is held against them yet either way
+ * (see throwSequenceStarted), so the initial highlight just waits for them
+ * rather than disappearing first.
  *
  * Manual throws reuse the exact same Throw geometry as the scripted "Show
  * me" demo (via `this.physics`, a JugglingSimulator instance kept around
@@ -58,6 +76,11 @@ export default class Game {
         this.renderer = renderer;
         this.$beatBar = $beatBar;
         this.$beatBarWrap = $beatBarWrap;
+        // Only read for isSync (see ThrowHeight.getAvailableHeights/
+        // buildWedgeState) - sync's wedge ladders and labels work
+        // differently than vanilla's (every height is even; crossing is an
+        // explicit 'x' rather than implied by odd/even).
+        this.isSync = siteswap.isSync;
 
         // Never ticked with update()/processBeat() as a schedule - only read
         // for its fixed constants (hands.*.outerX/innerX, arcPeakFor,
@@ -66,16 +89,81 @@ export default class Game {
         // setBpm() is still called on it (see setBpm below) purely to keep
         // its timeScale in sync, since manual throws borrow that too.
         this.physics = new JugglingSimulator(siteswap, { bpm });
+        // Chronologically ordered - one full period of the pattern's own
+        // scripted throws, tagged with hand/crossing/height (see
+        // JugglingSimulator.getGhostPaths) - doubles as both the ghost-path
+        // geometry to render and the sequence Game's own throws are checked
+        // against (see throwSequenceIndex below).
         this.paths = this.physics.getGhostPaths();
         this.period = this.physics.period;
         this.ballRadius = this.physics.ballRadius;
         this.extent = this.buildExtent();
+
+        // this.paths grouped by beat, so a synchronous pattern's beat-pairs
+        // (both hands throwing at once - see SyncSiteswap) are tracked and
+        // highlighted as one atomic step rather than two throws in a row.
+        // For an async pattern every step is just a single throw, so this
+        // degrades to the same one-at-a-time behavior as before (see
+        // buildThrowSequenceSteps/recordThrowSequenceOutcome).
+        this.throwSequenceSteps = this.buildThrowSequenceSteps();
         // The two height "ladders" (crossing: odd, self: even) a held throw
         // can select from, capped at whatever this pattern's tallest throw
         // is - see ThrowHeight and this.charging below.
-        const { crossHeights, selfHeights } = getAvailableHeights(this.physics.getMaxHeight());
+        const { crossHeights, selfHeights } = getAvailableHeights(this.physics.getMaxHeight(), { sync: this.isSync });
         this.crossHeights = crossHeights;
         this.selfHeights = selfHeights;
+
+        // Everything below is runtime state that a restart (see resetState/
+        // restart) puts back to its just-constructed values, as opposed to
+        // the pattern-derived, never-changing setup above.
+        this.resetState();
+
+        this.inputSchemes = [new KeyboardInput({
+            onThrowStart: (intent) => this.handleThrowStart(intent),
+            onThrowRelease: (intent) => this.handleThrowRelease(intent),
+        })];
+
+        this.rafId = null;
+    }
+
+    /**
+     * (Re)initializes every piece of state that actually changes over the
+     * course of play - as opposed to the fixed, pattern-derived setup in
+     * the constructor above it (this.physics, this.paths,
+     * this.throwSequenceSteps, this.crossHeights/selfHeights, etc), which
+     * never needs to be touched again. Called once from the constructor,
+     * and again from restart() to put the player right back at the
+     * beginning without tearing down and recreating the whole Game (which
+     * would mean detaching and reattaching input schemes, losing the
+     * render/tick loop, etc).
+     */
+    resetState() {
+        // Tracks progress through this.throwSequenceSteps, independent of
+        // the live beat clock - so an off-tempo start or a mistake doesn't
+        // just cosmetically desync the ghost highlight for the rest of the
+        // run (see recordThrowSequenceOutcome/resolveBeatThrow). Index of
+        // the next expected step; advances only once every hand due to
+        // throw in that step has matched (see throwSequencePending).
+        this.throwSequenceIndex = 0;
+        // Which of the current step's hands still haven't thrown correctly
+        // yet - reset to that step's full hand set whenever the pointer
+        // advances. A sync step starts with both hands pending and only
+        // advances once both have gone through; an async step always has
+        // exactly one.
+        this.throwSequencePending = new Set(this.throwSequenceSteps[0].entries.map((entry) => entry.hand));
+        // Consecutive correct throws since the last mismatch - highlighting
+        // resumes once this reaches a full period (this.paths.length).
+        this.throwSequenceStreak = 0;
+        // True once a mismatch (a wrong throw, or an attempt that failed
+        // outright) has hidden the ghost highlight; cleared only by a full
+        // clean period (see recordThrowSequenceOutcome).
+        this.throwSequenceHidden = false;
+        // False until the player has landed the very first expected throw -
+        // nothing is held against them before that (see
+        // recordThrowSequenceOutcome), so the initial highlight just waits,
+        // untouched by wrong or failed attempts, until they actually hit it
+        // once.
+        this.throwSequenceStarted = false;
 
         // Beat bar and ghost-path highlight are driven off this one clock,
         // so dragging the BPM slider can't leave them out of sync with each
@@ -114,13 +202,47 @@ export default class Game {
         // targeted - { crossing } or null (see handleThrowStart/Release).
         this.dangerHold = { L: null, R: null };
 
-        this.inputSchemes = [new KeyboardInput({
-            onThrowStart: (intent) => this.handleThrowStart(intent),
-            onThrowRelease: (intent) => this.handleThrowRelease(intent),
-        })];
+        this.lastTimestamp = performance.now();
+    }
 
-        this.rafId = null;
-        this.lastTimestamp = 0;
+    /**
+     * Puts every ball back in its starting hand and the beat clock back to
+     * zero, without otherwise disturbing the running game (input stays
+     * attached, the render/tick loop keeps going) - lets the player jump
+     * right back to a clean attempt instead of stopping and re-launching
+     * "Let me try!" from App. A held-down throw key physically stays held
+     * through the restart, but since KeyboardInput only reports a fresh
+     * press once its key has actually been released (see keysHeld there),
+     * that's inert here - nothing further fires until the player lets go
+     * and presses again.
+     */
+    restart() {
+        this.resetState();
+        this.$beatBar.css('transform', 'scaleX(1)');
+        this.draw();
+    }
+
+    /**
+     * Groups this.paths into chronological steps - runs of consecutive
+     * entries sharing the same `beat` (paths already come back in that
+     * order, R-before-L within a beat - see JugglingSimulator.getGhostPaths).
+     * An async pattern never has two hands on the same beat, so every step
+     * here is trivially just one throw; a synchronous pattern's beat-pairs
+     * group into a single two-throw step instead, so the tracker below
+     * waits for both hands before advancing rather than treating them as
+     * two throws in a row.
+     */
+    buildThrowSequenceSteps() {
+        const steps = [];
+        for (const path of this.paths) {
+            const current = steps[steps.length - 1];
+            if (current && current.beat === path.beat) {
+                current.entries.push(path);
+            } else {
+                steps.push({ beat: path.beat, entries: [path] });
+            }
+        }
+        return steps;
     }
 
     /** Splits the pattern's balls round-robin, R first, between the hands' starting queues. */
@@ -279,11 +401,21 @@ export default class Game {
      * flash + cancel on an empty hand or an expired hold. A white hold is
      * cleared after the beat so the key must be released and pressed again
      * before the next attempt; a yellow lock is always consumed on the beat.
+     *
+     * If neither is present, this hand simply didn't attempt anything this
+     * beat - not held against the player (see decoupling in
+     * recordThrowSequenceOutcome). There's no fixed per-beat obligation in
+     * this game (a hand can sit on a ball as long as the player likes), so
+     * idle beats with no press at all aren't treated as misses - only a
+     * throw that's actually attempted and fails (empty hand, expired hold,
+     * or the wrong hand/crossing/height) breaks the ghost-highlight streak.
      */
     resolveBeatThrow(hand) {
         const locked = this.lockedThrow[hand];
         const charge = this.charging[hand];
-        if (!locked && !charge) return;
+        if (!locked && !charge) {
+            return;
+        }
 
         let crossing;
         let height;
@@ -308,6 +440,7 @@ export default class Game {
                     litRings,
                 };
                 this.charging[hand] = null;
+                this.recordThrowSequenceOutcome(null, crossing, height);
                 return;
             }
         }
@@ -331,6 +464,54 @@ export default class Game {
 
         if (success) {
             this.executeThrow(hand, crossing, height);
+        }
+        this.recordThrowSequenceOutcome(success ? hand : null, crossing, height);
+    }
+
+    /**
+     * Advances (or breaks) progress through the pattern's own scripted throw
+     * order (see this.paths/throwSequenceIndex) given the outcome of one
+     * hand's beat-boundary throw attempt (or, from resolveLandings, a catch
+     * that reveals an earlier throw never happened at all). `hand` is null
+     * for anything that isn't an actual successful throw - an empty-hand
+     * cancel, an expired hold, or an unthrown ball getting caught on top of
+     * - which always counts as a mismatch, same as a throw that did fire
+     * but with the wrong hand/crossing/height for what's next expected.
+     *
+     * On a mismatch, the streak resets and the highlight hides, but the
+     * pointer itself doesn't move - it keeps waiting for that same expected
+     * step, so the very next correct throw already starts real recovery
+     * rather than being compared against whatever came after the miss (and,
+     * for a synchronous step, a hand that already matched this step stays
+     * matched - only the still-pending hand(s) are re-evaluated). Before the
+     * player's first-ever match, though, mismatches are ignored outright
+     * (see throwSequenceStarted) - there's nothing to recover from yet, so
+     * the initial highlight just keeps waiting for them to get to it, rather
+     * than hiding before they've had a real chance to start.
+     */
+    recordThrowSequenceOutcome(hand, crossing, height) {
+        const step = this.throwSequenceSteps[this.throwSequenceIndex];
+        const expected = hand !== null ? step.entries.find((entry) => entry.hand === hand) : null;
+        const matched = expected
+            && this.throwSequencePending.has(hand)
+            && expected.crossing === crossing
+            && expected.height === height;
+
+        if (matched) {
+            this.throwSequenceStarted = true;
+            this.throwSequencePending.delete(hand);
+            this.throwSequenceStreak += 1;
+            if (this.throwSequenceStreak >= this.paths.length) {
+                this.throwSequenceHidden = false;
+            }
+            if (this.throwSequencePending.size === 0) {
+                this.throwSequenceIndex = (this.throwSequenceIndex + 1) % this.throwSequenceSteps.length;
+                const nextStep = this.throwSequenceSteps[this.throwSequenceIndex];
+                this.throwSequencePending = new Set(nextStep.entries.map((entry) => entry.hand));
+            }
+        } else if (this.throwSequenceStarted) {
+            this.throwSequenceStreak = 0;
+            this.throwSequenceHidden = true;
         }
     }
 
@@ -421,11 +602,27 @@ export default class Game {
         return rest;
     }
 
-    /** Lands any manually-thrown ball whose flight has finished by now, into the outer end of its destination hand's queue. */
+    /**
+     * Lands any manually-thrown ball whose flight has finished by now, into
+     * the outer end of its destination hand's queue.
+     *
+     * Also doubles as the game's only "missed throw" detector: since none
+     * of these patterns are multiplexed, a hand should never be holding
+     * more than one ball at a time once real play is underway - if a catch
+     * lands on top of a ball that's already sitting there, that resting
+     * ball's throw never happened, which breaks the sequence streak exactly
+     * like a wrong throw would (see recordThrowSequenceOutcome). Gated on
+     * throwSequenceStarted so it doesn't fire from the initial multi-ball
+     * deal (see buildInitialQueues) or from fumbling before the player's
+     * first-ever correct throw - both already exempt from mismatches.
+     */
     resolveLandings(uptoTime = this.time) {
         for (let i = this.inFlight.length - 1; i >= 0; i--) {
             const entry = this.inFlight[i];
             if (entry.flight.endTime <= uptoTime + LANDING_EPSILON) {
+                if (this.throwSequenceStarted && this.queues[entry.destHand].length > 0) {
+                    this.recordThrowSequenceOutcome(null, null, null);
+                }
                 entry.ball.restVelocity = entry.flight.landVelocity;
                 this.queues[entry.destHand].push(entry.ball);
                 this.inFlight.splice(i, 1);
@@ -497,9 +694,15 @@ export default class Game {
             wedges.push(this.buildWedgeState(hand, anchor));
         }
 
+        // A synchronous step's two paths (see buildThrowSequenceSteps) both
+        // stay highlighted together, dropping out individually as each
+        // hand's throw actually lands - not tied to a single flat index.
+        const currentStepBeat = this.throwSequenceSteps[this.throwSequenceIndex].beat;
         const staticPaths = this.paths.map((path) => ({
             points: path.points,
-            highlighted: path.beat === this.beatIndex,
+            highlighted: !this.throwSequenceHidden
+                && path.beat === currentStepBeat
+                && this.throwSequencePending.has(path.hand),
         }));
 
         this.renderer.draw({
@@ -507,25 +710,33 @@ export default class Game {
             staticPaths,
             ballRadius: this.ballRadius,
             wedges,
-            jugglingBounds: this.computeJugglingScreenBounds(balls, staticPaths),
+            jugglingBounds: this.computeJugglingScreenBounds(staticPaths),
         });
     }
 
     /**
-     * Horizontal screen edges of what's actually on screen right now - hands,
-     * live balls, and ghost paths - for wedge placement. Kept separate from
+     * Horizontal screen edges of the pattern's fixed geometry - hand
+     * positions and ghost paths, both constant for this Game's whole life -
+     * for wedge placement. Deliberately excludes anything that actually
+     * moves: not just queued balls (which can stack arbitrarily wide, sit
+     * below the wedges anyway, and have nothing to do with the pattern's
+     * shape), but also live in-flight balls - a throw's carry phase briefly
+     * recoils past the hand's catch point (see Throw.carryPositionAt),
+     * which, if included, would nudge these bounds - and therefore the
+     * wedges - by a few pixels right at the moment a queue changes, visible
+     * as an unwanted slide (most noticeable on narrow screens, where the
+     * wedge sits at its uncapped "ideal" position instead of pinned against
+     * WEDGE_MAX_OFFSET_FROM_CENTER). The ghost paths already trace that same
+     * carry-overshoot shape, just as fixed data, so nothing is lost by
+     * sizing around them instead of the live balls. Also kept separate from
      * this.extent, which is padded for worst-case queue growth and camera
      * fit only (see buildExtent).
      */
-    computeJugglingScreenBounds(balls, staticPaths) {
+    computeJugglingScreenBounds(staticPaths) {
         const p = this.physics;
         let minX = p.hands.L.outerX;
         let maxX = p.hands.R.outerX;
 
-        for (const ball of balls) {
-            minX = Math.min(minX, ball.x - ball.radius);
-            maxX = Math.max(maxX, ball.x + ball.radius);
-        }
         for (const entry of staticPaths) {
             for (const point of entry.points) {
                 minX = Math.min(minX, point.x);
@@ -554,6 +765,7 @@ export default class Game {
             anchor,
             crossHeights: this.crossHeights,
             selfHeights: this.selfHeights,
+            sync: this.isSync,
             target: this.computeTargetState(hand),
         };
 

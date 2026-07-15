@@ -3,21 +3,46 @@
 <head>
     <meta name="viewport" content="width=device-width, user-scalable=no">
     <title>Pixel Juggle</title>
+    <!-- Title font: Major Mono Display (active) - Londrina Sketch and Plaster
+         loaded too as ready-to-swap backups (see index.less's #game-title). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Londrina+Sketch&family=Plaster&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
 </head>
 
-<body>
+<body class="mode-menu">
     <div id="app">
-        <header id="controls">
-            <label for="siteswap-input">Siteswap</label>
-            <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
-                autocorrect="off" spellcheck="false" placeholder="e.g. 531" value="3">
-            <div id="validation-message"></div>
-            <div id="action-buttons">
-                <button id="show-me-button" class="action-button secondary" disabled>Show me</button>
-                <button id="try-button" class="action-button primary" disabled>Let me try!</button>
-                <button id="stop-button" class="action-button stop hidden">Stop</button>
+        <!-- Menu screen: siteswap picker + Show me/Let me try - hidden once a
+             demo or game is running (see body.mode-demo/mode-game in index.less). -->
+        <div id="title-screen">
+            <h1 id="game-title">PiXel JuGGle</h1>
+            <div id="pattern-picker">
+                <!-- Purple disc between the ::before/::after orbs and the
+                     controls - only two pseudos available, so the face gets
+                     its own element rather than sharing ::after. -->
+                <div class="pattern-picker-disc" aria-hidden="true"></div>
+                <div id="pattern-select-wrap">
+                    <button type="button" id="pattern-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+                        <span class="pattern-name"></span>
+                        <i class="fa-solid fa-chevron-down pattern-select-caret" aria-hidden="true"></i>
+                    </button>
+                    <ul id="pattern-select-list" class="pattern-select-list hidden" role="listbox"></ul>
+                </div>
+                <div id="custom-input-wrap" class="hidden">
+                        <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
+                            autocorrect="off" spellcheck="false" placeholder="e.g. 531">
+                        <span id="validation-icon" class="hidden" title="">
+                            <i class="fa-solid" aria-hidden="true"></i>
+                        </span>
+                    </div>
+                    <div id="menu-buttons">
+                        <button id="show-me-button" class="action-button secondary" disabled>Show me</button>
+                        <button id="try-button" class="action-button primary" disabled>Let me try!</button>
+                    </div>
+                </div>
             </div>
-        </header>
+        </div>
         <div id="canvas-area">
             <canvas id="juggle-canvas"></canvas>
             <div id="beat-bar-wrap" class="hidden">
@@ -30,6 +55,17 @@
                 </div>
                 <div id="bpm-value">60</div>
             </div>
+        </div>
+        <!-- Demo/game chrome: replaces the old text Stop/Restart buttons and
+             the whole idle-state header once something is actually running
+             (see body.mode-demo/mode-game in index.less). -->
+        <div id="game-controls">
+            <button id="restart-button" class="icon-button" title="Restart (R)">
+                <i class="fa-solid fa-rotate-left"></i>
+            </button>
+            <button id="stop-button" class="icon-button" title="Stop">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
         </div>
     </div>
 </body>

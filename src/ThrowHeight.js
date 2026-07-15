@@ -9,15 +9,31 @@ export const CANCEL_FLASH_FRACTION = 0.20;
 
 /**
  * The two height "ladders" a player can pick from with a held throw, given
- * the tallest throw this siteswap ever calls for. Crossing throws only ever
- * land on odd heights (1, 3, 5, ...) and self throws only on even ones
- * (2, 4, ...) under the usual alternating-hands convention. Each ladder
- * includes every height of its parity up to maxHeight; if that leaves one
- * side with fewer rings than the other (e.g. max height 3 → cross has 1 &
- * 3 but self only has 2), the shorter side is extended with the next
- * heights in its parity so both wedges always show the same ring count.
+ * the tallest throw this siteswap ever calls for.
+ *
+ * In vanilla (async), crossing throws only ever land on odd heights
+ * (1, 3, 5, ...) and self throws only on even ones (2, 4, ...) under the
+ * usual alternating-hands convention. Each ladder includes every height of
+ * its parity up to maxHeight; if that leaves one side with fewer rings than
+ * the other (e.g. max height 3 → cross has 1 & 3 but self only has 2), the
+ * shorter side is extended with the next heights in its parity so both
+ * wedges always show the same ring count.
+ *
+ * Sync notation has no such parity link - every height is even (S1/S2 - see
+ * SyncSiteswap), and crossing is instead an independent, explicit 'x' on
+ * the throw. So with `sync` set, both ladders are identical: every even
+ * height up to maxHeight, and it's up to the caller (Renderer, via the
+ * `sync` flag threaded onto the wedge state) to label the cross side's
+ * numbers with a trailing 'x' rather than relying on the number itself
+ * implying crossing.
  */
-export function getAvailableHeights(maxHeight) {
+export function getAvailableHeights(maxHeight, { sync = false } = {}) {
+    if (sync) {
+        const heights = [];
+        for (let h = 2; h <= maxHeight; h += 2) heights.push(h);
+        return { crossHeights: heights, selfHeights: heights.slice() };
+    }
+
     const crossHeights = [];
     for (let h = 1; h <= maxHeight; h += 2) crossHeights.push(h);
     const selfHeights = [];

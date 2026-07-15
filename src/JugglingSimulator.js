@@ -429,9 +429,14 @@ export default class JugglingSimulator {
      * that period's throws.
      *
      * Each returned path is tagged with `beat` - its offset (0..period-1)
-     * within that harvested period - so a caller wanting to highlight
-     * "whichever throw happens this beat" (e.g. a practice-mode cue) can
-     * match paths to the live beat count without re-deriving anything.
+     * within that harvested period - plus the `hand`, `crossing`, and
+     * `height` of the scripted throw it depicts, and comes back in
+     * chronological (beat, then within-beat R-before-L) order, i.e. exactly
+     * the pattern's own throw sequence for one full period. A caller can
+     * match paths to the live beat count for a simple "whichever throw
+     * happens this beat" cue, or - as Game does - track a pointer through
+     * this same order independent of the clock, advancing it only when a
+     * live throw's own hand/crossing/height matches the next entry.
      */
     getGhostPaths() {
         this._buildingSteadyState = true;
@@ -476,14 +481,27 @@ export default class JugglingSimulator {
             this.processBeat(beat, beatTime);
             if (beat >= harvestStartBeat) {
                 const relativeBeat = beat - harvestStartBeat;
-                for (const entry of this.inFlight.slice(before)) {
-                    harvested.push({ beat: relativeBeat, entry });
-                }
+                // processBeat executes slot.R then slot.L (see there), so the
+                // newly-appended inFlight entries land in that same order -
+                // zip them back up with which hand/crossing/height each one
+                // came from, so callers can match a live throw attempt
+                // against its scripted counterpart (see Game's throw-order
+                // tracking) without re-deriving it from the raw path alone.
+                const slot = this.slots[beat % this.period];
+                const throwOrder = [];
+                if (slot.R) throwOrder.push({ hand: 'R', crossing: slot.R.crossing, height: slot.R.height });
+                if (slot.L) throwOrder.push({ hand: 'L', crossing: slot.L.crossing, height: slot.L.height });
+                this.inFlight.slice(before).forEach((entry, i) => {
+                    harvested.push({ beat: relativeBeat, ...throwOrder[i], entry });
+                });
             }
         }
 
-        return harvested.map(({ beat: relativeBeat, entry }) => ({
+        return harvested.map(({ beat: relativeBeat, hand, crossing, height, entry }) => ({
             beat: relativeBeat,
+            hand,
+            crossing,
+            height,
             points: entry.flight.samplePath(),
         }));
         } finally {

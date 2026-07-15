@@ -5,6 +5,12 @@
 @invalid: #e6194b;
 @text: #ececf1;
 
+// Pulled from Ball.js's own PALETTE, so the title screen's decorative circles
+// read as the same colors the actual juggling balls use.
+@orb-top: #f58231;
+@orb-bottom: #911eb4;
+@orb-picker: #42d4f4;
+
 html,
 body {
     height: 100%;
@@ -18,40 +24,172 @@ body {
 }
 
 #app {
-    display: flex;
-    flex-direction: column;
+    position: relative;
     height: 100vh;
+    overflow: hidden;
 }
 
-#controls {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 12px 18px;
-    background-color: @panel;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-    z-index: 1;
-    flex-wrap: wrap;
+.hidden {
+    display: none !important;
+}
 
-    label {
-        font-weight: bold;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        font-size: 13px;
-        color: fade(@text, 70%);
+// Which of the three screens (menu / demo / game) is showing is driven
+// entirely by one body class (see App.setMode) - everything below just
+// reacts to it, so there's a single source of truth for "what's visible
+// right now" rather than each element tracking its own show/hide flag.
+#title-screen {
+    display: none;
+}
+
+#canvas-area,
+#game-controls {
+    display: none;
+}
+
+body.mode-menu {
+    #title-screen {
+        display: flex;
     }
 }
 
-#siteswap-input {
-    font-size: 18px;
-    font-family: 'Courier New', monospace;
-    letter-spacing: 3px;
-    padding: 8px 12px;
-    width: 160px;
+body.mode-demo,
+body.mode-game {
+    #canvas-area {
+        display: block;
+    }
+
+    #game-controls {
+        display: flex;
+    }
+}
+
+// --- Title screen (menu) ----------------------------------------------
+
+#title-screen {
+    position: relative;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    padding-top: 8vh;
+}
+
+#game-title {
+    // Major Mono Display is the active pick - Londrina Sketch and Plaster
+    // are loaded too (see index.html's Google Fonts link) as easy backups;
+    // swap the family here to try either instead.
+    font-family: 'Major Mono Display', monospace;
+    // font-family: 'Londrina Sketch', cursive;
+    // font-family: 'Plaster', cursive;
+    font-size: 64px;
+    font-weight: 400;
+    letter-spacing: 6px;
+    margin: 0 0 6vh;
+    color: @text;
+    text-shadow: 0 0 18px fade(@accent, 65%), 0 0 40px fade(@orb-picker, 35%);
+    text-align: center;
+}
+
+// Centered on the title screen. Each decorative orb is its own 340px
+// circle (::before top, ::after bottom); the purple disc sits between
+// them and the controls via .pattern-picker-disc (only two pseudos
+// available, and the element's own background paints as a square tile).
+#pattern-picker {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 380px;
+    height: 380px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 0 56px;
+    box-sizing: border-box;
+    text-align: center;
+
+    &::before,
+    &::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        width: 380px;
+        height: 380px;
+        transform: translate(-50%, -50%);
+        border-radius: 50%;
+        pointer-events: none;
+        z-index: 0;
+    }
+
+    &::before {
+        top: calc(50% - 70px);
+        background: radial-gradient(circle at 35% 30%, fade(@orb-top, 95%), fade(@orb-top, 5%));
+    }
+
+    &::after {
+        top: calc(50% + 70px);
+        background: radial-gradient(circle at 65% 70%, fade(@orb-bottom, 95%), fade(@orb-bottom, 5%));
+    }
+
+    .pattern-picker-disc {
+        position: absolute;
+        inset: 0;
+        border-radius: 50%;
+        background: radial-gradient(@orb-picker, darken(@orb-picker, 50%));
+        // border: 3px solid @orb-picker;
+        // box-shadow: 0 0 40px fade(@orb-picker, 45%);
+        pointer-events: none;
+        z-index: 1;
+    }
+
+    > :not(.pattern-picker-disc) {
+        position: relative;
+        z-index: 2;
+    }
+}
+
+#pattern-select-wrap {
+    position: relative;
+    width: 100%;
+    z-index: 2;
+
+    // Siblings (custom input, buttons) share z-index 2 and paint later in
+    // DOM order, so the list needs the whole wrap lifted while it's open.
+    &.open {
+        z-index: 10;
+    }
+}
+
+#pattern-select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 15px;
+    font-family: Arial, sans-serif;
+    padding: 8px 10px;
     border: 1px solid #3a3a52;
     border-radius: 6px;
     background-color: #0e0e18;
     color: @text;
+    cursor: pointer;
+    text-align: left;
+
+    .pattern-name {
+        flex: 1;
+        min-width: 0;
+        text-align: left;
+    }
+
+    .pattern-select-caret {
+        flex-shrink: 0;
+        font-size: 12px;
+        color: fade(@text, 55%);
+        transition: transform 0.15s ease;
+    }
 
     &:focus {
         outline: none;
@@ -59,20 +197,158 @@ body {
     }
 }
 
-.hidden {
-    display: none !important;
+#pattern-select-wrap.open #pattern-select-trigger {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-color: transparent;
+
+    .pattern-select-caret {
+        transform: rotate(180deg);
+    }
 }
 
-#action-buttons {
+.pattern-select-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    cursor: pointer;
+
+    &:hover,
+    &.selected {
+        background-color: fade(@accent, 18%);
+    }
+
+    &.pattern-select-custom {
+        font-style: italic;
+        color: fade(@text, 80%);
+
+        .pattern-name {
+            letter-spacing: 0.3px;
+        }
+    }
+}
+
+.pattern-select-list {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin: 0;
+    padding: 4px 0;
+    list-style: none;
+    border: 1px solid #3a3a52;
+    border-top: none;
+    border-radius: 0 0 6px 6px;
+    background-color: fade(#0e0e18, 75%);
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    max-height: 280px;
+    overflow-y: auto;
+    z-index: 1;
+}
+
+.pattern-select-divider {
+    height: 1px;
+    margin: 4px 0;
+    background-color: #3a3a52;
+    pointer-events: none;
+
+    &.pattern-select-divider-major {
+        margin: 6px 0;
+        background-color: fade(@text, 22%);
+    }
+}
+
+.pattern-select-group-label {
+    padding: 6px 10px 4px;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: fade(@text, 45%);
+    pointer-events: none;
+}
+
+.pattern-name {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+}
+
+.pattern-siteswap {
+    flex-shrink: 0;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    letter-spacing: 1px;
+    color: fade(@text, 45%);
+    text-align: right;
+
+    &.hidden {
+        display: none;
+    }
+}
+
+#custom-input-wrap {
+    position: relative;
+    width: 100%;
+}
+
+#siteswap-input {
+    width: 100%;
+    box-sizing: border-box;
+    font-size: 16px;
+    font-family: 'Courier New', monospace;
+    letter-spacing: 2px;
+    padding: 8px 36px 8px 10px;
+    border: 1px solid #3a3a52;
+    border-radius: 6px;
+    background-color: #0e0e18;
+    color: @text;
+    text-align: center;
+
+    &:focus {
+        outline: none;
+        border-color: @accent;
+    }
+}
+
+#validation-icon {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    line-height: 1;
+    cursor: help;
+    pointer-events: auto;
+
+    &.valid {
+        color: @valid;
+    }
+
+    &.invalid {
+        color: @invalid;
+    }
+}
+
+#menu-buttons {
     display: flex;
     gap: 10px;
-    margin-left: auto;
+    width: 100%;
+
+    .action-button {
+        flex: 1;
+    }
 }
 
 .action-button {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: bold;
-    padding: 9px 20px;
+    padding: 9px 16px;
     border: none;
     border-radius: 6px;
     color: white;
@@ -99,28 +375,14 @@ body {
     &.primary {
         background-color: @accent;
     }
-
-    &.stop {
-        background-color: @invalid;
-    }
 }
 
-#validation-message {
-    font-size: 14px;
-
-    &.valid {
-        color: @valid;
-    }
-
-    &.invalid {
-        color: @invalid;
-    }
-}
+// --- Demo/game chrome ---------------------------------------------------
 
 #canvas-area {
     position: relative;
-    flex: 1;
-    min-height: 0;
+    width: 100%;
+    height: 100%;
 }
 
 // The metronome for "Let me try!" gameplay mode - jumps to full width at the
@@ -207,4 +469,44 @@ body {
     color: @text;
     min-width: 2.5em;
     text-align: center;
+}
+
+// Stop (X) and restart (undo) - the only chrome shown once a demo or game
+// is actually running (see body.mode-demo/mode-game above). Font Awesome's
+// free tier only ships the "solid" style (thin/light are Pro-only - see
+// https://fontawesome.com/plans), so "thin" here is approximated with a
+// large size plus reduced opacity rather than an actually lighter glyph.
+#game-controls {
+    position: absolute;
+    top: 18px;
+    right: 22px;
+    gap: 18px;
+    z-index: 10;
+}
+
+.icon-button {
+    background: none;
+    border: none;
+    color: fade(@text, 80%);
+    font-size: 34px;
+    line-height: 1;
+    padding: 6px;
+    cursor: pointer;
+    transition: color 0.15s ease, transform 0.1s ease;
+
+    &:hover {
+        color: @text;
+    }
+
+    &:active {
+        transform: translateY(1px);
+    }
+}
+
+#stop-button:hover {
+    color: @invalid;
+}
+
+#restart-button:hover {
+    color: @accent;
 }

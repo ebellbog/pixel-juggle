@@ -14,6 +14,9 @@ export default class Siteswap {
         this.numBalls = numBalls;
         this.isValid = isValid;
         this.error = error;
+        // Distinguishes from SyncSiteswap for callers that need to know
+        // (e.g. Game/ThrowHeight picking wedge-ladder labels - see there).
+        this.isSync = false;
     }
 
     static parse(rawInput) {

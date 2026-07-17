@@ -70,12 +70,28 @@ const BEAT_FLASH_MS = 180;
  * Pressing the throw button with no valid target shows a red danger state
  * on that wedge for as long as the key stays held (see dangerHold), rather
  * than starting a charge that could never succeed.
+ *
+ * Every beat also ticks this.soundtrack (see Soundtrack) once, and every
+ * manual throw fires off a fading tone through it. Unlike the demo, which
+ * steps the soundtrack's chord progression on a plain beat count (see
+ * JugglingSimulator.processBeat), here it's driven entirely by the
+ * player's own accuracy instead (see soundtrackSuccessCount/
+ * recordThrowSequenceOutcome) - correct throws advance it, a mismatch
+ * resets it. That, plus onBeat/executeThrow's calls into it, is the
+ * entirety of this class's involvement with sound; the actual synthesis
+ * lives there.
  */
 export default class Game {
-    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap }) {
+    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap, soundtrack }) {
         this.renderer = renderer;
         this.$beatBar = $beatBar;
         this.$beatBarWrap = $beatBarWrap;
+        // A percussive tick per beat and a fading tone per manual throw -
+        // see onBeat/executeThrow below and Soundtrack itself. Always
+        // present (App hands over a real instance), and every one of its
+        // public methods is already a safe no-op on its own if Web Audio
+        // isn't available, so there's nothing to null-check here.
+        this.soundtrack = soundtrack;
         // Only read for isSync (see ThrowHeight.getAvailableHeights/
         // buildWedgeState) - sync's wedge ladders and labels work
         // differently than vanilla's (every height is even; crossing is an
@@ -164,6 +180,17 @@ export default class Game {
         // untouched by wrong or failed attempts, until they actually hit it
         // once.
         this.throwSequenceStarted = false;
+        // Consecutive correct throws since the last mismatch *or* the last
+        // chord change - unlike throwSequenceStreak (which tracks the ghost
+        // highlight and never resets on a good run), this one resets to 0
+        // every time it reaches physics.effectivePeriodForMusic, stepping
+        // the soundtrack's chord progression each time it does (see
+        // recordThrowSequenceOutcome) - so, unlike the demo's plain beat
+        // count (see JugglingSimulator.processBeat), the chord in "let me
+        // try" only ever advances on the player's own successful throws,
+        // and a mismatch resets it back to the first chord rather than
+        // letting it silently keep climbing through failures.
+        this.soundtrackSuccessCount = 0;
 
         // Beat bar and ghost-path highlight are driven off this one clock,
         // so dragging the BPM slider can't leave them out of sync with each
@@ -218,6 +245,7 @@ export default class Game {
      */
     restart() {
         this.resetState();
+        this.soundtrack.stopAll();
         this.$beatBar.css('transform', 'scaleX(1)');
         this.draw();
     }
@@ -390,6 +418,7 @@ export default class Game {
 
     /** Fires or cancels beat-boundary throws for both locked (yellow) and held (white) hands. */
     onBeat() {
+        this.soundtrack.playBeat(60 / this.physics.bpm);
         for (const hand of ['L', 'R']) {
             this.resolveBeatThrow(hand);
         }
@@ -488,6 +517,13 @@ export default class Game {
      * (see throwSequenceStarted) - there's nothing to recover from yet, so
      * the initial highlight just keeps waiting for them to get to it, rather
      * than hiding before they've had a real chance to start.
+     *
+     * Also drives the soundtrack's chord progression (see
+     * soundtrackSuccessCount/Soundtrack.advancePeriod): every match nudges
+     * it toward the next chord, and every real mismatch snaps it straight
+     * back to the first one - same start-only gating as the ghost highlight
+     * above, so fumbling before the player's first correct throw doesn't
+     * reset anything that hasn't started progressing yet.
      */
     recordThrowSequenceOutcome(hand, crossing, height) {
         const step = this.throwSequenceSteps[this.throwSequenceIndex];
@@ -509,9 +545,16 @@ export default class Game {
                 const nextStep = this.throwSequenceSteps[this.throwSequenceIndex];
                 this.throwSequencePending = new Set(nextStep.entries.map((entry) => entry.hand));
             }
+            this.soundtrackSuccessCount += 1;
+            if (this.soundtrackSuccessCount >= this.physics.effectivePeriodForMusic) {
+                this.soundtrackSuccessCount = 0;
+                this.soundtrack.advancePeriod();
+            }
         } else if (this.throwSequenceStarted) {
             this.throwSequenceStreak = 0;
             this.throwSequenceHidden = true;
+            this.soundtrackSuccessCount = 0;
+            this.soundtrack.resetProgression();
         }
     }
 
@@ -569,6 +612,12 @@ export default class Game {
         });
 
         this.inFlight.push({ flight, ball, destHand, sourceHand: hand });
+
+        // Real-world seconds until this ball is caught again, at whatever
+        // tempo is live right now - see the matching comment in
+        // JugglingSimulator.executeThrow.
+        const durationSeconds = (height * 60) / p.bpm;
+        this.soundtrack.playThrow({ hand, height, durationSeconds });
     }
 
     /**

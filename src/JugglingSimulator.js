@@ -75,13 +75,33 @@ function computeSpawnOrder(slots, period, numBalls) {
  * at y = 0; throws arc upward.
  */
 export default class JugglingSimulator {
-    constructor(siteswap, { bpm = 200, ballRadius = 0.12, gravity = 20, _skipSteadyStateProbe = false } = {}) {
+    constructor(siteswap, {
+        bpm = 200, ballRadius = 0.12, gravity = 20, _skipSteadyStateProbe = false,
+        // Optional hooks for a soundtrack (or anything else) that wants to
+        // react to real, live-playback beats/throws - see processBeat/
+        // executeThrow below. Never fired during getGhostPaths's own
+        // warm-up/harvest (see _buildingSteadyState), nor on the separate
+        // probe instance _ensureSteadyStateIncoming builds (which never
+        // receives these options at all), so silent bookkeeping runs never
+        // make noise.
+        onBeat = null, onThrow = null,
+    } = {}) {
         this._siteswap = siteswap;
         this._steadyStateOpts = { bpm, ballRadius, gravity, _skipSteadyStateProbe: true };
+        this.onBeat = onBeat;
+        this.onThrow = onThrow;
         const schedule = siteswap.toSchedule();
         this.period = schedule.period;
         this.numBalls = schedule.numBalls;
         this.slots = schedule.slots;
+        // "One full cycle" for music purposes (see processBeat's isNewPeriod
+        // and Game's soundtrackEffectivePeriod) isn't always this.period
+        // beats - a pattern like "3" repeats every single beat but still has
+        // 3 distinct balls, so waiting only this.period beats between chords
+        // would step the progression well before every ball's actually been
+        // thrown once. Never shorter than this.period itself, just padded up
+        // to numBalls when the pattern alone would be too short.
+        this.effectivePeriodForMusic = Math.max(this.period, this.numBalls);
         // Which hand each ball will be fed into, in spawn order - fixed for
         // the pattern's whole life, used only to lay out not-yet-spawned
         // balls as a waiting queue (see getRenderState/getExtent).
@@ -303,6 +323,27 @@ export default class JugglingSimulator {
     }
 
     processBeat(beat, beatTime) {
+        // Fires for every beat, whether or not either hand actually throws
+        // on it (a siteswap "0" rest beat still keeps the pulse going) -
+        // see the onBeat option above. First argument is the real-world
+        // length of one beat at the current (live) tempo, not
+        // this.beatDuration (fixed at REFERENCE_BPM - see setBpm), so a
+        // soundtrack listener can subdivide it correctly regardless of BPM.
+        // Second is whether this beat starts a new music-cycle (beat 0
+        // doesn't count - nothing has actually cycled yet), for a
+        // soundtrack listener to step a chord progression on (see
+        // Soundtrack.advancePeriod) - not fired on the same beat as the
+        // cycle's own last throws (which still belong to the cycle that
+        // just ended), but on the very next one, before its own throws
+        // below happen. Measured in effectivePeriodForMusic beats, not
+        // this.period, so a short-period/many-ball pattern still gets a
+        // chance for every ball to have been thrown before the chord moves
+        // on (see effectivePeriodForMusic above).
+        if (!this._buildingSteadyState && this.onBeat) {
+            const isNewPeriod = beat > 0 && beat % this.effectivePeriodForMusic === 0;
+            this.onBeat(60 / this.bpm, isNewPeriod);
+        }
+
         // Execute this beat's scheduled throw(s). The schedule names which
         // hand(s) act rather than us inferring it from beat parity, since a
         // synchronous beat has both hands throwing at once.
@@ -361,6 +402,16 @@ export default class JugglingSimulator {
             ball,
             destHand,
         });
+
+        if (!this._buildingSteadyState && this.onThrow) {
+            // Real-world seconds until this ball is caught again - height
+            // beats at the *current* (possibly since-changed) tempo, not
+            // this.beatDuration, which is fixed at REFERENCE_BPM (see
+            // setBpm) - so the tone's fade (see Soundtrack.playThrow) always
+            // lands on the actual catch, at whatever speed is live right now.
+            const durationSeconds = (throwSpec.height * 60) / this.bpm;
+            this.onThrow({ hand: sourceHand, height: throwSpec.height, durationSeconds });
+        }
     }
 
     getRenderState() {

@@ -3,6 +3,7 @@ import SyncSiteswap from './SyncSiteswap.js';
 import JugglingSimulator from './JugglingSimulator.js';
 import Renderer from './Renderer.js';
 import Game from './Game.js';
+import Soundtrack from './Soundtrack.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 
 const DEFAULT_BPM = 60;
@@ -29,6 +30,7 @@ export default class App {
         this.$tryButton = $('#try-button');
         this.$stopButton = $('#stop-button');
         this.$restartButton = $('#restart-button');
+        this.$muteButton = $('#mute-button');
         this.$validationIcon = $('#validation-icon');
         this.$bpmSlider = $('#bpm-slider');
         this.$bpmValue = $('#bpm-value');
@@ -37,6 +39,11 @@ export default class App {
         this.canvas = document.getElementById('juggle-canvas');
 
         this.renderer = new Renderer(this.canvas);
+        // Shared for the whole page's life - both the demo's JugglingSimulator
+        // and Game get the same instance (see startDemo/startGame), so a mute
+        // toggled mid-demo stays muted if the player then switches to "Let me
+        // try!" without needing to reconcile two separate mute states.
+        this.soundtrack = new Soundtrack();
         this.siteswap = null;
         // Only set while the "Show me" demo animation is actually running.
         this.simulator = null;
@@ -52,6 +59,7 @@ export default class App {
         this.setMode('menu');
         this.handleResize();
         this.setPatternValue(this.patternValue);
+        this.updateMuteButton();
     }
 
     buildPatternSelect() {
@@ -170,6 +178,10 @@ export default class App {
         this.$tryButton.on('click', () => this.startGame());
         this.$stopButton.on('click', () => this.stop());
         this.$restartButton.on('click', () => this.restart());
+        this.$muteButton.on('click', () => {
+            this.soundtrack.toggleMuted();
+            this.updateMuteButton();
+        });
         this.$bpmSlider.on('input', () => this.setBpm(Number(this.$bpmSlider.val())));
         $(window).on('resize', () => this.handleResize());
         // 'R' restarts an active demo/game from the keyboard, same as the
@@ -188,6 +200,15 @@ export default class App {
             event.preventDefault();
             this.restart();
         });
+    }
+
+    /** Swaps the mute button's icon/title to match Soundtrack's current state. */
+    updateMuteButton() {
+        const muted = this.soundtrack.isMuted();
+        this.$muteButton
+            .find('i')
+            .attr('class', muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high');
+        this.$muteButton.attr('title', muted ? 'Unmute' : 'Mute');
     }
 
     /** Swaps between the menu/demo/game screens - see index.less for what each body class actually shows/hides. */
@@ -278,6 +299,10 @@ export default class App {
     startDemo() {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
+        // A click handler is exactly the user gesture browsers require
+        // before an AudioContext is allowed to actually produce sound - see
+        // Soundtrack.resume().
+        this.soundtrack.resume();
 
         // #canvas-area is hidden (display: none) on the menu screen, so it
         // has to actually become visible - via setMode - before resize()
@@ -285,7 +310,14 @@ export default class App {
         this.setMode('demo');
         this.renderer.resize();
 
-        this.simulator = new JugglingSimulator(this.siteswap, { bpm: this.bpm });
+        this.simulator = new JugglingSimulator(this.siteswap, {
+            bpm: this.bpm,
+            onBeat: (beatDurationSeconds, isNewPeriod) => {
+                if (isNewPeriod) this.soundtrack.advancePeriod();
+                this.soundtrack.playBeat(beatDurationSeconds);
+            },
+            onThrow: ({ hand, height, durationSeconds }) => this.soundtrack.playThrow({ hand, height, durationSeconds }),
+        });
         this.renderer.fit(this.simulator.getExtent());
         this.lastTimestamp = performance.now();
         this.rafId = requestAnimationFrame((ts) => this.tick(ts));
@@ -305,6 +337,7 @@ export default class App {
     startGame() {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
+        this.soundtrack.resume(); // See the matching comment in startDemo().
 
         // See the matching comment in startDemo() - the canvas needs to be
         // visible before anything measures it.
@@ -316,6 +349,7 @@ export default class App {
             renderer: this.renderer,
             $beatBar: this.$beatBar,
             $beatBarWrap: this.$beatBarWrap,
+            soundtrack: this.soundtrack,
         });
         this.game.start();
     }
@@ -332,7 +366,15 @@ export default class App {
         if (this.game) {
             this.game.restart();
         } else if (this.simulator) {
-            this.simulator = new JugglingSimulator(this.siteswap, { bpm: this.bpm });
+            this.soundtrack.stopAll();
+            this.simulator = new JugglingSimulator(this.siteswap, {
+                bpm: this.bpm,
+                onBeat: (beatDurationSeconds, isNewPeriod) => {
+                    if (isNewPeriod) this.soundtrack.advancePeriod();
+                    this.soundtrack.playBeat(beatDurationSeconds);
+                },
+                onThrow: ({ hand, height, durationSeconds }) => this.soundtrack.playThrow({ hand, height, durationSeconds }),
+            });
             this.renderer.fit(this.simulator.getExtent());
             this.lastTimestamp = performance.now();
         }
@@ -348,6 +390,7 @@ export default class App {
             this.game.stop();
             this.game = null;
         }
+        this.soundtrack.stopAll();
         this.renderer.draw({ balls: [] });
         this.setMode('menu');
     }

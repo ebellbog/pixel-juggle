@@ -71,8 +71,10 @@ const BEAT_FLASH_MS = 180;
  * on that wedge for as long as the key stays held (see dangerHold), rather
  * than starting a charge that could never succeed.
  *
- * Every beat also ticks this.soundtrack (see Soundtrack) once, and every
- * manual throw fires off a fading tone through it. Unlike the demo, which
+ * Every beat also ticks this.soundtrack (see Soundtrack) once, every manual
+ * throw fires off a fading tone through it, and every additional ring lit
+ * on an in-progress charge fires off a rising tick (see updateChargeTicks).
+ * Unlike the demo, which
  * steps the soundtrack's chord progression on a plain beat count (see
  * JugglingSimulator.processBeat), here it's driven entirely by the
  * player's own accuracy instead (see soundtrackSuccessCount/
@@ -222,6 +224,11 @@ export default class Game {
         // Per-hand in-progress button hold - { crossing, startWallTime } or
         // null (see handleThrowStart/handleThrowRelease/getChargeState).
         this.charging = { L: null, R: null };
+        // Per-hand ring count already ticked for the in-progress charge (see
+        // updateChargeTicks) - lets that method play exactly one rising tick
+        // each time the charge's own lit-ring count goes up, rather than
+        // once per frame.
+        this.chargeTickRings = { L: 0, R: 0 };
         // Brief green/red wedge flash after a beat-boundary throw attempt -
         // { color, wallTime, crossing, litRings } or null.
         this.beatFlash = { L: null, R: null };
@@ -391,6 +398,31 @@ export default class Game {
             cancelFlash: chargeInCancelFlash(elapsedSeconds, beatDurationSeconds),
             wedgeHidden: chargeWedgeHidden(elapsedSeconds, beatDurationSeconds),
         };
+    }
+
+    /**
+     * One rising soundtrack tick (see Soundtrack.playChargeTick) per
+     * additional ring lit on each hand's in-progress charge, including the
+     * very first ring the instant a charge starts - called every frame
+     * (see tick()) and compared against chargeTickRings rather than fired
+     * straight from handleThrowStart/getChargeState, so it stays correct
+     * even if a single frame's charge-window math jumps across more than
+     * one ring at once (a hitch, or very few rings on a fast beat). Resets
+     * back to 0 the instant a hand isn't charging, so the next fresh press
+     * starts from ring 1 again.
+     */
+    updateChargeTicks() {
+        for (const hand of ['L', 'R']) {
+            if (!this.charging[hand]) {
+                this.chargeTickRings[hand] = 0;
+                continue;
+            }
+            const litRings = this.getChargeState(hand).litRings;
+            for (let ring = this.chargeTickRings[hand] + 1; ring <= litRings; ring++) {
+                this.soundtrack.playChargeTick(ring);
+            }
+            this.chargeTickRings[hand] = litRings;
+        }
     }
 
     /** Locks in height on release (yellow wedge), or clears a danger hold. */
@@ -709,6 +741,7 @@ export default class Game {
             remaining -= step;
         }
         this.expireBeatFlashes();
+        this.updateChargeTicks();
 
         this.draw();
 

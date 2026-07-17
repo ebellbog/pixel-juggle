@@ -118,6 +118,23 @@ const SNARE_TONE_HZ = 190;
 const SNARE_TONE_DECAY_SECONDS = 0.05;
 const SNARE_TONE_PEAK_GAIN = 0.32;
 
+// A quiet, quick click per additional ring lit while charging a throw (see
+// playChargeTick/Game.updateChargeTicks) - short enough, and quiet enough,
+// to read as a subtle feedback tick rather than competing with the beat's
+// own percussion or an actual throw's tone.
+const CHARGE_TICK_BASE_HZ = 640;
+// Each ring a semitone-ish step above the last, so a full charge reads as a
+// short rising run rather than identical clicks - deliberately not tied to
+// PROGRESSION/frequencyForThrow at all, since this is charge progress, not
+// a pitch that needs to match anything a throw will actually sound like.
+const CHARGE_TICK_SEMITONES_PER_RING = 2.5;
+const CHARGE_TICK_DECAY_SECONDS = 0.045;
+const CHARGE_TICK_PEAK_GAIN = 0.09;
+// A separate overall volume knob on top of CHARGE_TICK_PEAK_GAIN, rather
+// than just tuning that constant directly, so it's easy to keep coming back
+// and nudging this one number later without having to re-derive the peak.
+const CHARGE_TICK_VOLUME_SCALE = 0.85;
+
 /**
  * A four-bar drum break (see playBeat) that phases in on
  * DRUM_BREAK_STARTS_ON_LAP, each hit expressed as a fraction of one beat so
@@ -137,10 +154,12 @@ const DRUM_BREAK_MEASURES = [
 /**
  * Every sound this game makes: an echoing kick on each beat that gives way,
  * on DRUM_BREAK_STARTS_ON_LAP, to a four-bar kick/snare drum break (see
- * playBeat/periodsCompleted) - plus a tone per throw (gaining an
+ * playBeat/periodsCompleted) - a tone per throw (gaining an
  * off-beat octave echo on ECHO_VOICE_STARTS_ON_LAP - see playThrow) whose
  * pitch depends on its height (see frequencyForThrow), transposed to a new
- * chord as the pattern repeats (see advancePeriod). Deliberately the
+ * chord as the pattern repeats (see advancePeriod) - and a quiet rising
+ * click per ring lit while a throw is being charged (see
+ * playChargeTick/Game.updateChargeTicks). Deliberately the
  * *only* file that touches the Web Audio API, so the whole feature stays
  * easy to mute (setMuted/toggleMuted) or delete outright later - removing
  * this file and its handful of call sites (Game.onBeat/executeThrow, App's
@@ -372,6 +391,34 @@ export default class Soundtrack {
         toneGain.connect(this.masterGain);
         tone.start(startTime);
         tone.stop(startTime + SNARE_TONE_DECAY_SECONDS + 0.02);
+    }
+
+    /**
+     * One quiet click for the `ringIndex`-th ring lit while charging a
+     * throw (see Game.updateChargeTicks) - a single plain sine, no second
+     * layer or sweep like the kick/snare above, since this needs to read as
+     * a light tick under everything else rather than its own percussive
+     * hit. Pitch climbs CHARGE_TICK_SEMITONES_PER_RING per ring so a full
+     * charge reads as a short rising run, giving a clear, continuous sense
+     * of climbing height without having to look at the wedge at all.
+     */
+    playChargeTick(ringIndex) {
+        if (!this.context) return;
+        const now = this.context.currentTime;
+        const frequency = CHARGE_TICK_BASE_HZ * 2 ** ((ringIndex - 1) * CHARGE_TICK_SEMITONES_PER_RING / 12);
+
+        const osc = this.context.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = frequency;
+
+        const gain = this.context.createGain();
+        gain.gain.setValueAtTime(CHARGE_TICK_PEAK_GAIN * CHARGE_TICK_VOLUME_SCALE, now);
+        gain.gain.exponentialRampToValueAtTime(MIN_AUDIBLE_GAIN, now + CHARGE_TICK_DECAY_SECONDS);
+
+        osc.connect(gain);
+        gain.connect(this.masterGain);
+        osc.start(now);
+        osc.stop(now + CHARGE_TICK_DECAY_SECONDS + 0.02);
     }
 
     /**

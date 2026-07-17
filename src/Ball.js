@@ -1,14 +1,14 @@
 const PALETTE = [
-    '#e6194b',
-    '#3cb44b',
-    '#4363d8',
-    '#f58231',
-    '#911eb4',
-    '#42d4f4',
-    '#f032e6',
-    '#bfef45',
-    '#fabed4',
-    '#469990',
+    '#911eb4', // Purple
+    '#f58231', // Orange
+    '#42d4f4', // Cyan / Light Blue
+    '#e6194b', // Red
+    '#3cb44b', // Green
+    '#4363d8', // Blue
+    '#f032e6', // Magenta / Pink
+    '#bfef45', // Lime / Light Green
+    '#fabed4', // Pink / Light Pink
+    '#469990', // Teal
 ];
 
 export default class Ball {

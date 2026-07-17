@@ -280,13 +280,24 @@ export default class Game {
         return steps;
     }
 
-    /** Splits the pattern's balls round-robin, R first, between the hands' starting queues. */
+    /**
+     * Deals the pattern's balls into the hands' starting queues via
+     * this.physics.spawnOrder - the exact same hand assignment "Show me"
+     * uses to feed balls into the pattern one at a time as it establishes
+     * itself (see JugglingSimulator's computeSpawnOrder) - rather than a
+     * separate, simpler round-robin here that could disagree with it (e.g.
+     * a shower like "51" needs two balls in one hand and one in the other,
+     * not an even split). spawnOrder is already in throw order for each
+     * hand, so pushing straight through also gets queue depth right: the
+     * first ball spawnOrder assigns to a given hand ends up innermost
+     * (index 0, next to throw - see this.queues' own header comment)
+     * simply because it's pushed first.
+     */
     buildInitialQueues() {
         const queues = { L: [], R: [] };
-        for (let i = 0; i < this.physics.numBalls; i++) {
-            const hand = i % 2 === 0 ? 'R' : 'L';
-            queues[hand].push(new Ball(i));
-        }
+        this.physics.spawnOrder.forEach((hand, id) => {
+            queues[hand].push(new Ball(id));
+        });
         return queues;
     }
 

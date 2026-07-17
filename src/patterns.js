@@ -7,8 +7,8 @@ export const PATTERN_GROUPS = [
         patterns: [
             { value: '3', name: 'Cascade' },
             { value: '51', name: 'Shower' },
-            { value: '441', name: 'Half Box' },
             { value: '5', name: '5 Ball Cascade' },
+            { value: '441', name: 'Half Box' },
         ],
     },
     {
@@ -16,13 +16,14 @@ export const PATTERN_GROUPS = [
         patterns: [
             { value: '4', name: '4 Ball Fountain' },
             { value: '(4,4)', name: '4 Ball Sync Fountain' },
-            { value: '(4,2x)*', name: 'Box' },
+            { value: '447', name: '447' },
             { value: '531', name: '531' },
         ],
     },
     {
         label: 'Hard',
         patterns: [
+            { value: '(4,2x)*', name: 'Box' },
             { value: '534', name: '534' },
             { value: '97531', name: '97531' },
         ],

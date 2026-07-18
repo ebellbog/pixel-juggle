@@ -42,6 +42,12 @@ const PROGRESSION = [
 // shift when either stage kicks in.
 const DRUM_BREAK_STARTS_ON_LAP = 2;
 const ECHO_VOICE_STARTS_ON_LAP = 3;
+// periodsCompleted value at which ECHO_VOICE_STARTS_ON_LAP begins - pulled
+// out to its own name since both playThrow (to actually start the echo
+// voice) and getVisualProgress (so a caller can fade a purely visual effect
+// in over that exact same run, landing "fully on" at the same instant the
+// echo does - see there) need to compare against it.
+const ECHO_VOICE_PERIODS_THRESHOLD = (ECHO_VOICE_STARTS_ON_LAP - 1) * PROGRESSION.length;
 // A full octave above the main note - a plain octave fuses almost
 // completely into a single, richer-sounding note when both voices start at
 // the same instant (same pitch "chroma", just twelve semitones apart), but
@@ -263,6 +269,20 @@ export default class Soundtrack {
     }
 
     /**
+     * 0 (fresh start/just reset) to 1 (ECHO_VOICE_STARTS_ON_LAP reached),
+     * climbing linearly with periodsCompleted in between - exposed so a
+     * purely visual "reward for staying clean" effect (see Renderer's
+     * bokeh wash/Game/App's bokehIntensity) can fade in over exactly the
+     * same clean run the echo voice itself builds up over, landing fully
+     * visible at the same instant the echo starts, rather than tracking
+     * its own separate progress.
+     */
+    getVisualProgress() {
+        if (ECHO_VOICE_PERIODS_THRESHOLD <= 0) return 1;
+        return Math.min(1, this.periodsCompleted / ECHO_VOICE_PERIODS_THRESHOLD);
+    }
+
+    /**
      * Fires once per beat, regardless of whether anything is actually
      * thrown on it - the pulse keeps going even through a siteswap "0"
      * rest. Plain echoing kick (see playEchoKick) until a full lap of the
@@ -443,7 +463,7 @@ export default class Soundtrack {
         if (!this.context || !(durationSeconds > 0)) return;
         const frequency = this.frequencyForThrow(hand, height);
         this.playTone(frequency, durationSeconds);
-        if (this.periodsCompleted >= (ECHO_VOICE_STARTS_ON_LAP - 1) * PROGRESSION.length) {
+        if (this.periodsCompleted >= ECHO_VOICE_PERIODS_THRESHOLD) {
             const beatDurationSeconds = durationSeconds / height;
             const echoOffsetSeconds = beatDurationSeconds * ECHO_OFFSET_BEAT_FRACTION;
             this.playTone(

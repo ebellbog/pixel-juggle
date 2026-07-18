@@ -1,3 +1,79 @@
+// Soft, blurred, additively-blended color blobs drawn behind everything
+// else (see drawBokeh) - a screensaver-like "bokeh" field, one blob per
+// ball, that eases toward each ball's actual position rather than
+// snapping to it, and grows/brightens with how fast that ball is currently
+// moving on screen. Deliberately not tied to world-space ball radius or
+// camera scale at all - unlike every other size in this file, bokeh blobs
+// are meant to read as a diffuse background wash regardless of zoom, not
+// as part of the simulated scene.
+const BOKEH_BASE_RADIUS_RATIO = 0.5; // relative to min(cssWidth, cssHeight)
+// Pulled back some from an earlier, even blurrier pass - at full screen
+// coverage, too much blur was smearing every ball's color into the same
+// indistinct mush; this keeps blobs soft while still letting distinct
+// colors stay legible as they overlap.
+const BOKEH_BLUR_PX = 90;
+// Alpha pulled back from the smaller-blob version as the radius/blur above
+// grew, since much bigger, heavily-overlapping circles under additive
+// blending accumulate brightness fast - without this, filling the screen
+// stops reading as a subdued wash and starts blowing out to solid color.
+// Pulled back a further notch here so the effect stays subdued even once
+// fully faded in (see `intensity` below).
+const BOKEH_BASE_ALPHA = 0.042;
+const BOKEH_SPEED_ALPHA_BOOST = 0.07;
+const BOKEH_SPEED_RADIUS_BOOST = 0.35;
+// Slow, gentle "breathing" of each blob's own radius, on top of (not
+// instead of) its speed-driven size boost - a fixed sine wave over many
+// seconds rather than anything tied to gameplay, purely to keep the field
+// feeling alive even while balls are moving slowly or resting.
+const BOKEH_PULSE_PERIOD_SECONDS = 9;
+const BOKEH_PULSE_AMPLITUDE = 0.3; // fraction of the blob's own radius
+// Each blob's pulse is offset by its ball id times this many radians
+// rather than all starting in phase, so they visibly breathe out of sync
+// with each other instead of swelling and shrinking in lockstep. The
+// golden angle spreads any number of ids' phases evenly around the cycle
+// rather than a plain fraction of 2*pi, which can land unlucky ids
+// (e.g. exactly half the count apart) right back in phase with each other.
+const BOKEH_PULSE_PHASE_STEP_RADIANS = 2.39996;
+// Balls' actual screen-space horizontal range is only as wide as the
+// juggling pattern itself, which sits well short of the screen's full
+// width - most of a ball's real motion is fairly central. Multiplying a
+// blob's horizontal offset from screen-center by this much lets the
+// *color field* swing all the way out to both edges even though the balls
+// producing it never do, rather than leaving the sides of the screen
+// permanently bare. Vertical motion is left alone - throws already cover
+// most of the screen's height on their own.
+const BOKEH_HORIZONTAL_SPREAD_SCALE = 2.2;
+// Radial-gradient inner stop, as a fraction of a blob's own (current)
+// radius - within this innermost circle the color sits at full computed
+// alpha; outside it, alpha eases down to 0 by the outer radius. Small on
+// purpose: the fade needs to span nearly the whole blob, not just a thin
+// band at its rim, for the blob to read as one smooth center-to-edge
+// falloff rather than a solid disc with only its edge softened (which is
+// closer to what blur alone, with no inner gradient stop at all, used to
+// produce - see drawBokeh).
+const BOKEH_INNER_RADIUS_RATIO = 0.08;
+// Screen px/sec past which a blob's speed-driven size/brightness boost is
+// already maxed out - tuned to roughly a fast throw's peak screen speed
+// rather than any fixed world-space velocity, since this is measured in
+// screen pixels (post camera-scale) already.
+const BOKEH_SPEED_REFERENCE = 1400;
+// How much of the gap to the ball's real position a blob closes per
+// second (an exponential ease, not a fixed step) - small enough that the
+// glow visibly lags and trails through a throw's arc instead of tracking
+// it exactly, which is what makes it read as an ambient field the balls
+// are stirring rather than a glow stuck to each ball.
+const BOKEH_FOLLOW_TIME_CONSTANT = 0.5;
+// Smooths the frame-to-frame instantaneous speed sample itself, since a
+// single frame's raw delta (especially right at a throw/catch) is noisy.
+const BOKEH_SPEED_SMOOTHING_SECONDS = 0.12;
+const BOKEH_MAX_DT = 0.1; // Matches App/Game's own big-frame-gap clamp.
+
+/** '#rrggbb' -> {r, g, b} - every ball color (see Ball.js's PALETTE) is already exactly this shape. */
+function hexToRgb(hex) {
+    const value = parseInt(hex.slice(1), 16);
+    return { r: (value >> 16) & 255, g: (value >> 8) & 255, b: value & 255 };
+}
+
 /**
  * Draws balls on a canvas. Owns the world->screen camera transform, so all
  * future zoom behavior (fit to ball count / max height) lives here without
@@ -13,6 +89,23 @@ export default class Renderer {
         this.cssWidth = 0;
         this.cssHeight = 0;
         this.camera = { scale: 1, centerX: 0, centerY: 0 };
+
+        // Per-ball-id bokeh tracking state (see drawBokeh), keyed by the
+        // `id` on each state.balls entry - persists across frames/draw()
+        // calls so a blob's lag and speed-smoothing carry over smoothly,
+        // rather than resetting every frame.
+        this.bokehBlobs = new Map();
+        this.lastBokehTime = null;
+        // Free-running clock driving each blob's pulse (see drawBokeh) -
+        // its own thing rather than reusing lastBokehTime directly so a
+        // frame where drawBokeh no-ops early (no balls, reduced motion)
+        // still leaves elapsed time consistent for whenever it resumes.
+        this.bokehElapsedSeconds = 0;
+        // Respect the OS-level motion preference - this effect is purely
+        // decorative, so the simplest accessible behavior is just skipping
+        // it entirely rather than offering a reduced variant.
+        this.reducedMotion = typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     }
 
     /** Match the backing store to the display size (accounting for DPR). */
@@ -86,10 +179,131 @@ export default class Renderer {
         };
     }
 
+    /**
+     * A soft, colored "bokeh" wash behind everything else: one big blurred,
+     * additively-blended circle per ball (see BOKEH_* above), sized and
+     * brightened by how fast that ball is currently moving on screen, and
+     * further breathing slowly in and out on its own fixed cycle (each
+     * blob's own phase offset by its ball id - see BOKEH_PULSE_*), whose
+     * position eases toward the ball's real one rather than snapping to it -
+     * so the field reads as an ambient, slowly-shifting glow the balls stir
+     * as they move, not a halo glued to each one. Every ball currently in
+     * `balls` (flying, held, or waiting in a queue) gets a blob, all of
+     * them always present at once - a resting/queued ball's blob just
+     * settles down to near-zero size/alpha on its own once its speed
+     * (tracked per id, see bokehBlobs) decays, rather than being added or
+     * removed as balls start/stop flying.
+     *
+     * No-ops entirely (and drops all tracked state) once `balls` is empty -
+     * e.g. the title screen, or right after Stop - so a later demo/game
+     * restarting with fresh, lower ball ids never inherits a stale blob
+     * position left over from a previous run.
+     *
+     * `intensity` (0-1, defaulting to fully on) is an overall alpha
+     * multiplier - Game/App ramp this up from 0 as the player (or the
+     * scripted demo) racks up a clean run, so the whole effect fades in
+     * gradually rather than being either fully present or fully absent
+     * (see Soundtrack.getVisualProgress, which both derive it from so this
+     * lands "fully on" at the exact same moment the soundtrack's own echo
+     * voice kicks in).
+     */
+    drawBokeh(balls, intensity = 1) {
+        const now = performance.now();
+        const dt = this.lastBokehTime != null
+            ? Math.min((now - this.lastBokehTime) / 1000, BOKEH_MAX_DT)
+            : 0;
+        this.lastBokehTime = now;
+        this.bokehElapsedSeconds += dt;
+
+        if (this.reducedMotion || !balls || balls.length === 0 || intensity <= 0) {
+            this.bokehBlobs.clear();
+            return;
+        }
+
+        const ctx = this.ctx;
+        const baseRadius = Math.min(this.cssWidth, this.cssHeight) * BOKEH_BASE_RADIUS_RATIO;
+        const followRate = 1 - Math.exp(-dt / BOKEH_FOLLOW_TIME_CONSTANT);
+        const speedSmoothingRate = dt > 0 ? Math.min(1, dt / BOKEH_SPEED_SMOOTHING_SECONDS) : 0;
+        const centerX = this.cssWidth / 2;
+
+        ctx.save();
+        ctx.filter = `blur(${BOKEH_BLUR_PX}px)`;
+        ctx.globalCompositeOperation = 'lighter';
+
+        const seenIds = new Set();
+        for (const ball of balls) {
+            if (ball.id == null) continue;
+            seenIds.add(ball.id);
+            const screen = this.worldToScreen(ball.x, ball.y);
+            // The blob's own target position, not the ball's real screen
+            // position - see BOKEH_HORIZONTAL_SPREAD_SCALE above.
+            const targetX = centerX + (screen.x - centerX) * BOKEH_HORIZONTAL_SPREAD_SCALE;
+            const targetY = screen.y;
+
+            let blob = this.bokehBlobs.get(ball.id);
+            if (!blob) {
+                blob = {
+                    x: targetX, y: targetY, prevX: targetX, prevY: targetY, speed: 0,
+                    pulsePhase: ball.id * BOKEH_PULSE_PHASE_STEP_RADIANS,
+                };
+                this.bokehBlobs.set(ball.id, blob);
+            }
+
+            if (dt > 0) {
+                const instantSpeed = Math.hypot(targetX - blob.prevX, targetY - blob.prevY) / dt;
+                blob.speed += (instantSpeed - blob.speed) * speedSmoothingRate;
+            }
+            blob.prevX = targetX;
+            blob.prevY = targetY;
+            blob.x += (targetX - blob.x) * followRate;
+            blob.y += (targetY - blob.y) * followRate;
+
+            const speedRatio = Math.min(blob.speed / BOKEH_SPEED_REFERENCE, 1);
+            const pulseAngle = (this.bokehElapsedSeconds / BOKEH_PULSE_PERIOD_SECONDS) * Math.PI * 2 + blob.pulsePhase;
+            const pulse = 1 + Math.sin(pulseAngle) * BOKEH_PULSE_AMPLITUDE;
+            const radius = baseRadius * (1 + speedRatio * BOKEH_SPEED_RADIUS_BOOST) * pulse;
+            const alpha = (BOKEH_BASE_ALPHA + speedRatio * BOKEH_SPEED_ALPHA_BOOST) * intensity;
+
+            // A radial gradient rather than a flat fill so the fade spans
+            // nearly the whole blob (see BOKEH_INNER_RADIUS_RATIO) instead
+            // of relying on the canvas blur filter alone to soften just its
+            // outer rim.
+            const { r, g, b } = hexToRgb(ball.color);
+            const gradient = ctx.createRadialGradient(
+                blob.x, blob.y, radius * BOKEH_INNER_RADIUS_RATIO,
+                blob.x, blob.y, radius,
+            );
+            gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+            gradient.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+            gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+            ctx.beginPath();
+            ctx.arc(blob.x, blob.y, radius, 0, Math.PI * 2);
+            ctx.fillStyle = gradient;
+            ctx.fill();
+        }
+
+        // Ball ids are stable and always all-present for a pattern's whole
+        // life (see Game/JugglingSimulator's own render-state builders), so
+        // this only actually trims anything when a new, shorter-lived
+        // pattern starts - guards against stale blobs outliving the ball
+        // id they belonged to.
+        for (const id of this.bokehBlobs.keys()) {
+            if (!seenIds.has(id)) this.bokehBlobs.delete(id);
+        }
+
+        ctx.restore();
+    }
+
     draw(state) {
         const ctx = this.ctx;
         ctx.fillStyle = this.background;
         ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
+
+        // Drawn immediately after the flat background fill, before
+        // anything else - a background layer the rest of the scene sits on
+        // top of, not a glow added on top of it (see drawBokeh).
+        this.drawBokeh(state.balls, state.bokehIntensity);
 
         // Trails are drawn before the balls so they read as a fading tail
         // behind each one, not a preview of where it's about to go. Each
@@ -261,18 +475,24 @@ export default class Renderer {
                 ctx.arc(cx, cy, r0, endAngle, startAngle, true);
                 ctx.closePath();
 
+                let fillStyle = null;
                 if (flashStyle) {
-                    ctx.fillStyle = lit ? flashStyle.fill : 'rgba(0, 0, 0, 0.35)';
+                    if (lit) fillStyle = flashStyle.fill;
                 } else if (cancelFlash) {
-                    ctx.fillStyle = 'rgba(210, 50, 50, 0.92)';
+                    fillStyle = 'rgba(210, 50, 50, 0.92)';
                 } else if (lit && locked) {
-                    ctx.fillStyle = `rgba(240, 210, 50, ${Math.max(0.45, 1 - ring * 0.15).toFixed(3)})`;
+                    fillStyle = `rgba(240, 210, 50, ${Math.max(0.45, 1 - ring * 0.15).toFixed(3)})`;
                 } else if (lit) {
-                    ctx.fillStyle = `rgba(255, 255, 255, ${Math.max(0.4, 1 - ring * 0.15).toFixed(3)})`;
-                } else {
-                    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+                    fillStyle = `rgba(255, 255, 255, ${Math.max(0.4, 1 - ring * 0.15).toFixed(3)})`;
                 }
-                ctx.fill();
+                // Unlit rings leave fillStyle null so only the stroke shows -
+                // same effect as a transparent/page-colored background rather
+                // than the old semi-opaque dark overlay.
+
+                if (fillStyle) {
+                    ctx.fillStyle = fillStyle;
+                    ctx.fill();
+                }
                 ctx.stroke();
 
                 const midAngle = (startAngle + endAngle) / 2;

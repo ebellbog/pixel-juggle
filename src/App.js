@@ -206,8 +206,8 @@ export default class App {
     updateMuteButton() {
         const muted = this.soundtrack.isMuted();
         this.$muteButton
-            .find('i')
-            .attr('class', muted ? 'fa-solid fa-volume-xmark' : 'fa-solid fa-volume-high');
+            .find('.material-symbols-outlined')
+            .text(muted ? 'volume_off' : 'volume_up');
         this.$muteButton.attr('title', muted ? 'Unmute' : 'Mute');
     }
 
@@ -235,7 +235,7 @@ export default class App {
         this.renderer.resize();
         if (this.simulator) {
             this.renderer.fit(this.simulator.getExtent());
-            this.renderer.draw(this.simulator.getRenderState());
+            this.renderer.draw(this.buildDemoRenderState());
         } else if (this.game) {
             this.game.handleResize();
         } else {
@@ -271,7 +271,7 @@ export default class App {
      * validation sentence/error string lives in the icon's title tooltip.
      */
     updateValidationIcon(isCustom, raw) {
-        const $glyph = this.$validationIcon.find('i');
+        const $glyph = this.$validationIcon.find('.material-symbols-outlined');
 
         if (!isCustom || raw.trim() === '') {
             this.$validationIcon.addClass('hidden').attr('title', '');
@@ -281,13 +281,13 @@ export default class App {
         if (this.siteswap.isValid) {
             const { numBalls, period } = this.siteswap;
             const plural = numBalls === 1 ? '' : 's';
-            $glyph.attr('class', 'fa-solid fa-circle-check');
+            $glyph.text('check_circle');
             this.$validationIcon
                 .removeClass('hidden invalid')
                 .addClass('valid')
                 .attr('title', `Valid: ${numBalls} ball${plural}, period ${period}`);
         } else {
-            $glyph.attr('class', 'fa-solid fa-circle-xmark');
+            $glyph.text('cancel');
             this.$validationIcon
                 .removeClass('hidden valid')
                 .addClass('invalid')
@@ -328,9 +328,27 @@ export default class App {
         this.lastTimestamp = timestamp;
 
         this.simulator.update(dt);
-        this.renderer.draw(this.simulator.getRenderState());
+        this.renderer.draw(this.buildDemoRenderState());
 
         this.rafId = requestAnimationFrame((ts) => this.tick(ts));
+    }
+
+    /**
+     * getRenderState() plus bokehIntensity (see Renderer.drawBokeh) - the
+     * scripted demo has no player "correctness" to key the fade-in off of
+     * the way Game does (see its getBokehIntensity), so this substitutes
+     * how far the beat clock currently is through the pattern's own
+     * effectivePeriodForMusic cycle, landing at exactly the same instant/
+     * threshold Soundtrack's own echo voice does either way (see
+     * Soundtrack.getVisualProgress).
+     */
+    buildDemoRenderState() {
+        const periodBeats = this.simulator.effectivePeriodForMusic;
+        const fraction = periodBeats > 0 ? (this.simulator.nextBeat % periodBeats) / periodBeats : 0;
+        return {
+            ...this.simulator.getRenderState(),
+            bokehIntensity: this.soundtrack.getVisualProgress(fraction),
+        };
     }
 
     /** "Let me try!" - hands off to Game for everything from here on. */

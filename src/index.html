@@ -6,7 +6,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Londrina+Sketch&family=Plaster&family=Turret+Road:wght@200;400;700&family=Asimovian&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,300,0,0&display=swap" rel="stylesheet">
 </head>
 
 <body class="mode-menu">
@@ -23,7 +23,7 @@
                 <div id="pattern-select-wrap">
                     <button type="button" id="pattern-select-trigger" aria-haspopup="listbox" aria-expanded="false">
                         <span class="pattern-name"></span>
-                        <i class="fa-solid fa-chevron-down pattern-select-caret" aria-hidden="true"></i>
+                        <span class="material-symbols-outlined pattern-select-caret" aria-hidden="true">expand_more</span>
                     </button>
                     <ul id="pattern-select-list" class="pattern-select-list hidden" role="listbox"></ul>
                 </div>
@@ -31,15 +31,15 @@
                         <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
                             autocorrect="off" spellcheck="false" placeholder="e.g. 531">
                         <span id="validation-icon" class="hidden" title="">
-                            <i class="fa-solid" aria-hidden="true"></i>
+                            <span class="material-symbols-outlined" aria-hidden="true"></span>
                         </span>
                     </div>
                     <div id="menu-buttons">
                         <button id="show-me-button" class="action-button secondary" disabled>
-                            <span class="button-icon">👀</span> Show me
+                            <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
                         </button>
                         <button id="try-button" class="action-button primary" disabled>
-                            <span class="button-icon">🤹‍♀️</span> Let me try
+                            <span class="material-symbols-outlined button-icon" aria-hidden="true">person_play</span> Let me try
                         </button>
                     </div>
                 </div>
@@ -62,13 +62,13 @@
              (see body.mode-demo/mode-game in index.less). -->
         <div id="game-controls">
             <button id="mute-button" class="icon-button" title="Mute">
-                <i class="fa-solid fa-volume-high"></i>
+                <span class="material-symbols-outlined" aria-hidden="true">volume_up</span>
             </button>
             <button id="restart-button" class="icon-button" title="Restart (R)">
-                <i class="fa-solid fa-rotate-left"></i>
+                <span class="material-symbols-outlined" aria-hidden="true">undo</span>
             </button>
             <button id="stop-button" class="icon-button" title="Stop">
-                <i class="fa-solid fa-xmark"></i>
+                <span class="material-symbols-outlined" aria-hidden="true">close</span>
             </button>
         </div>
     </div>

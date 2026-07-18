@@ -773,12 +773,12 @@ export default class Game {
                     i, this.time, this.queueShiftStart[hand], this.queueShiftUntil[hand],
                 );
                 const pos = queueSlotPosition(this.physics.hands, this.physics.handY, this.ballRadius, hand, slot);
-                balls.push({ x: pos.x, y: pos.y, radius: this.ballRadius, color: queue[i].color });
+                balls.push({ id: queue[i].id, x: pos.x, y: pos.y, radius: this.ballRadius, color: queue[i].color });
             }
         }
         for (const entry of this.inFlight) {
             const pos = entry.flight.positionAt(this.time);
-            balls.push({ x: pos.x, y: pos.y, radius: this.ballRadius, color: entry.ball.color });
+            balls.push({ id: entry.ball.id, x: pos.x, y: pos.y, radius: this.ballRadius, color: entry.ball.color });
         }
 
         const wedges = [];
@@ -804,7 +804,27 @@ export default class Game {
             ballRadius: this.ballRadius,
             wedges,
             jugglingBounds: this.computeJugglingScreenBounds(staticPaths),
+            bokehIntensity: this.getBokehIntensity(),
         });
+    }
+
+    /**
+     * 0-1 fade-in for Renderer's background bokeh wash (see
+     * Renderer.drawBokeh's `intensity`), climbing with the player's own
+     * consecutive correct throws rather than jumping in one step per full
+     * clean period the way soundtrackSuccessCount's chord-progression
+     * advances do - soundtrackSuccessCount/effectivePeriodForMusic is this
+     * period's own fractional progress, handed to Soundtrack as the
+     * "current period" term its own periodsCompleted-based progress is
+     * missing (see getVisualProgress), so the two stay in exact lockstep -
+     * a mismatch resetting soundtrackSuccessCount to 0 also visibly drops
+     * this back down, and it lands fully on at the exact same throw the
+     * echo voice itself starts on.
+     */
+    getBokehIntensity() {
+        const periodBeats = this.physics.effectivePeriodForMusic;
+        const fraction = periodBeats > 0 ? this.soundtrackSuccessCount / periodBeats : 0;
+        return this.soundtrack.getVisualProgress(fraction);
     }
 
     /**

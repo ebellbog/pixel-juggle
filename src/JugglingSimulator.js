@@ -419,6 +419,7 @@ export default class JugglingSimulator {
         for (const entry of this.inFlight) {
             const pos = entry.flight.positionAt(this.time);
             balls.push({
+                id: entry.ball.id,
                 x: pos.x,
                 y: pos.y,
                 radius: this.ballRadius,
@@ -429,6 +430,7 @@ export default class JugglingSimulator {
             const hand = this.hands[key];
             if (hand.ball) {
                 balls.push({
+                    id: hand.ball.id,
                     x: hand.outerX,
                     y: this.handY,
                     radius: this.ballRadius,
@@ -452,7 +454,7 @@ export default class JugglingSimulator {
                 queueDepth[hand], this.time, this.queueShiftStart[hand], this.queueShiftUntil[hand],
             );
             const pos = queueSlotPosition(this.hands, this.handY, this.ballRadius, hand, slot);
-            balls.push({ x: pos.x, y: pos.y, radius: this.ballRadius, color: Ball.colorFor(id) });
+            balls.push({ id, x: pos.x, y: pos.y, radius: this.ballRadius, color: Ball.colorFor(id) });
             queueDepth[hand] += 1;
         }
         // Each ball owns its own trail (see recordTrails), kept up to date

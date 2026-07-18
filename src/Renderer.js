@@ -244,7 +244,7 @@ export default class Renderer {
         ctx.strokeStyle = flashStyle?.stroke ?? (cancelFlash ? 'rgba(255, 120, 120, 0.95)' : 'rgba(255, 255, 255, 0.9)');
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = '16px sans-serif';
+        ctx.font = '16px "Asimovian", monospace';
 
         for (const side of ['cross', 'self']) {
             const heights = side === 'cross' ? crossHeights : selfHeights;
@@ -295,7 +295,7 @@ export default class Renderer {
             }
         }
 
-        ctx.font = '14px sans-serif';
+        ctx.font = '700 16px "Turret Road", sans-serif';
         ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';

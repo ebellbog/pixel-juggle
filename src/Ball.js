@@ -4,9 +4,10 @@ const PALETTE = [
     '#42d4f4', // Cyan / Light Blue
     '#e6194b', // Red
     '#3cb44b', // Green
+    '#ffff00', // Yellow
     '#4363d8', // Blue
     '#f032e6', // Magenta / Pink
-    '#bfef45', // Lime / Light Green
+    '#99ef43', // Lime / Light Green
     '#fabed4', // Pink / Light Pink
     '#469990', // Teal
 ];

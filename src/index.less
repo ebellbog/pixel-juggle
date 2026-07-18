@@ -11,6 +11,8 @@
 @orb-bottom: #911eb4;
 @orb-picker: #42d4f4;
 
+@border-radius-small: 4px;
+
 html,
 body {
     height: 100%;
@@ -168,11 +170,13 @@ body.mode-game {
     gap: 12px;
     width: 100%;
     box-sizing: border-box;
-    font-size: 15px;
-    font-family: Arial, sans-serif;
-    padding: 8px 10px;
+    font-size: 16px;
+    font-family: 'Turret Road', sans-serif;
+    font-weight: 400;
+    letter-spacing: .5px;
+    padding: 10px;
     border: 1px solid #3a3a52;
-    border-radius: 6px;
+    border-radius: @border-radius-small;
     background-color: #0e0e18;
     color: @text;
     cursor: pointer;
@@ -217,6 +221,11 @@ body.mode-game {
     padding: 8px 10px;
     cursor: pointer;
 
+    font-family: 'Turret Road', sans-serif;
+    font-size: 15px;
+    font-weight: 200;
+    letter-spacing: .5px;
+
     &:hover,
     &.selected {
         background-color: fade(@accent, 18%);
@@ -242,7 +251,7 @@ body.mode-game {
     list-style: none;
     border: 1px solid #3a3a52;
     border-top: none;
-    border-radius: 0 0 6px 6px;
+    border-radius: 0 0 @border-radius-small @border-radius-small;
     background-color: fade(#0e0e18, 75%);
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
@@ -282,7 +291,7 @@ body.mode-game {
 .pattern-siteswap {
     flex-shrink: 0;
     font-family: 'Courier New', monospace;
-    font-size: 13px;
+    font-size: 14px;
     letter-spacing: 1px;
     color: fade(@text, 45%);
     text-align: right;
@@ -303,9 +312,9 @@ body.mode-game {
     font-size: 16px;
     font-family: 'Courier New', monospace;
     letter-spacing: 2px;
-    padding: 8px 36px 8px 10px;
+    padding: 10px 36px 10px 10px;
     border: 1px solid #3a3a52;
-    border-radius: 6px;
+    border-radius: @border-radius-small;
     background-color: #0e0e18;
     color: @text;
     text-align: center;
@@ -346,17 +355,27 @@ body.mode-game {
 }
 
 .action-button {
-    font-size: 15px;
+    font-family: 'Asimovian', monospace;
+    font-size: 16px;
     font-weight: bold;
-    padding: 9px 16px;
+    padding: 8px 12px;
     border: none;
-    border-radius: 6px;
+    border-radius: 50px;
     color: white;
     cursor: pointer;
-    transition: background-color 0.15s ease, transform 0.1s ease;
+    box-shadow: 2px 3px 0 fade(black, 80%);
+    transition: all 0.15s ease, transform 0.1s ease;
+
+    .button-icon {
+        display: inline-block;
+        transform: scale(1.3);
+        margin-right: 4px;
+    }
 
     &:hover:not(:disabled) {
         filter: brightness(1.1);
+        box-shadow: none;
+        transform: translate(2px, 3px);
     }
 
     &:active:not(:disabled) {
@@ -366,14 +385,15 @@ body.mode-game {
     &:disabled {
         opacity: 0.4;
         cursor: not-allowed;
+        box-shadow: none;
     }
 
     &.secondary {
-        background-color: #4a4a5e;
+        background-color: darken(@orb-top, 20%);
     }
 
     &.primary {
-        background-color: @accent;
+        background-color: @orb-bottom;
     }
 }
 

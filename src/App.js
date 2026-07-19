@@ -51,6 +51,12 @@ export default class App {
         this.game = null;
         this.rafId = null;
         this.lastTimestamp = 0;
+        // Bumped by stop() and by every startDemo/startGame call - lets
+        // either method's pending soundtrack.resume() (see there) recognize
+        // that it's been superseded by a newer start/stop before it settles,
+        // rather than going ahead and starting a second simulator/game on
+        // top of whatever's now actually current.
+        this.startToken = 0;
         this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
         this.patternValue = PATTERN_GROUPS[0].patterns[0].value;
 
@@ -299,10 +305,6 @@ export default class App {
     startDemo() {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
-        // A click handler is exactly the user gesture browsers require
-        // before an AudioContext is allowed to actually produce sound - see
-        // Soundtrack.resume().
-        this.soundtrack.resume();
 
         // #canvas-area is hidden (display: none) on the menu screen, so it
         // has to actually become visible - via setMode - before resize()
@@ -310,17 +312,33 @@ export default class App {
         this.setMode('demo');
         this.renderer.resize();
 
-        this.simulator = new JugglingSimulator(this.siteswap, {
-            bpm: this.bpm,
-            onBeat: (beatDurationSeconds, isNewPeriod) => {
-                if (isNewPeriod) this.soundtrack.advancePeriod();
-                this.soundtrack.playBeat(beatDurationSeconds);
-            },
-            onThrow: ({ hand, height, durationSeconds }) => this.soundtrack.playThrow({ hand, height, durationSeconds }),
+        // A click handler is exactly the user gesture browsers require
+        // before an AudioContext is allowed to actually produce sound - see
+        // Soundtrack.resume() - but resume() itself is async, and the
+        // simulator's very first beat/throw fires on literally its first
+        // update() (both nextBeatTime and time start at 0 - see
+        // JugglingSimulator.update()), i.e. the very next animation frame
+        // after this returns. Waiting for resume() to actually settle
+        // before building the simulator/starting the tick loop is what
+        // keeps that first beat from ever being scheduled against a still-
+        // suspended context - which otherwise gets silently dropped once
+        // the context does wake up, misread as a warm-up hiccup.
+        const startToken = ++this.startToken;
+        this.soundtrack.resume().then(() => {
+            if (startToken !== this.startToken) return; // Superseded by a newer start/stop before resume() settled.
+
+            this.simulator = new JugglingSimulator(this.siteswap, {
+                bpm: this.bpm,
+                onBeat: (beatDurationSeconds, isNewPeriod) => {
+                    if (isNewPeriod) this.soundtrack.advancePeriod();
+                    this.soundtrack.playBeat(beatDurationSeconds);
+                },
+                onThrow: ({ hand, height, durationSeconds }) => this.soundtrack.playThrow({ hand, height, durationSeconds }),
+            });
+            this.renderer.fit(this.simulator.getExtent());
+            this.lastTimestamp = performance.now();
+            this.rafId = requestAnimationFrame((ts) => this.tick(ts));
         });
-        this.renderer.fit(this.simulator.getExtent());
-        this.lastTimestamp = performance.now();
-        this.rafId = requestAnimationFrame((ts) => this.tick(ts));
     }
 
     tick(timestamp) {
@@ -341,13 +359,32 @@ export default class App {
      * effectivePeriodForMusic cycle, landing at exactly the same instant/
      * threshold Soundtrack's own echo voice does either way (see
      * Soundtrack.getVisualProgress).
+     *
+     * Deliberately *not* `nextBeat % periodBeats` (how many beats into the
+     * pattern the *next*, not-yet-played beat sits) - `nextBeat` only
+     * advances past a period boundary the instant *after* that boundary
+     * beat's own onBeat callback has already fired advancePeriod() for it
+     * (see JugglingSimulator.update/processBeat), so for exactly one beat
+     * per period, a plain `nextBeat % periodBeats` has already wrapped
+     * back to 0 - claiming a new period has begun - while
+     * soundtrack.periodsCompleted hasn't actually been incremented to
+     * match yet, one full beat behind. getVisualProgress combines the two
+     * by simply adding them, so that one-beat lag briefly reads as *less*
+     * total progress than the beat before it - a real dip, not just this
+     * effect's own fade-in - before recovering once periodsCompleted
+     * catches up. Counting *completed* beats (nextBeat - 1, floored to 0)
+     * instead keeps this in lockstep with periodsCompleted's own timing:
+     * it only wraps back to (a full) 1 - not 0 - on exactly the beat
+     * whose own onBeat call is what increments periodsCompleted, so the
+     * two combine continuously with no lag in either direction.
      */
     buildDemoRenderState() {
         const periodBeats = this.simulator.effectivePeriodForMusic;
-        const fraction = periodBeats > 0 ? (this.simulator.nextBeat % periodBeats) / periodBeats : 0;
+        const beatsPlayed = Math.max(0, this.simulator.nextBeat - 1);
+        const fraction = periodBeats > 0 ? ((beatsPlayed % periodBeats) + 1) / periodBeats : 0;
         return {
             ...this.simulator.getRenderState(),
-            bokehIntensity: this.soundtrack.getVisualProgress(fraction),
+            bokehIntensity: this.soundtrack.getVisualProgress(this.simulator.nextBeat > 0 ? fraction : 0),
         };
     }
 
@@ -355,21 +392,27 @@ export default class App {
     startGame() {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
-        this.soundtrack.resume(); // See the matching comment in startDemo().
 
         // See the matching comment in startDemo() - the canvas needs to be
         // visible before anything measures it.
         this.setMode('game');
         this.renderer.resize();
 
-        this.game = new Game(this.siteswap, {
-            bpm: this.bpm,
-            renderer: this.renderer,
-            $beatBar: this.$beatBar,
-            $beatBarWrap: this.$beatBarWrap,
-            soundtrack: this.soundtrack,
+        // See the matching comment in startDemo() re: waiting for resume()
+        // to actually settle before anything can schedule sound.
+        const startToken = ++this.startToken;
+        this.soundtrack.resume().then(() => {
+            if (startToken !== this.startToken) return; // Superseded by a newer start/stop before resume() settled.
+
+            this.game = new Game(this.siteswap, {
+                bpm: this.bpm,
+                renderer: this.renderer,
+                $beatBar: this.$beatBar,
+                $beatBarWrap: this.$beatBarWrap,
+                soundtrack: this.soundtrack,
+            });
+            this.game.start();
         });
-        this.game.start();
     }
 
     /**
@@ -399,6 +442,10 @@ export default class App {
     }
 
     stop() {
+        // Invalidates any startDemo/startGame still waiting on
+        // soundtrack.resume() (see there) - e.g. the stop button clicked
+        // before resume() has settled.
+        this.startToken++;
         if (this.rafId !== null) {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;

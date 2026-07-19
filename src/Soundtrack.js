@@ -42,6 +42,14 @@ const PROGRESSION = [
 // shift when either stage kicks in.
 const DRUM_BREAK_STARTS_ON_LAP = 2;
 const ECHO_VOICE_STARTS_ON_LAP = 3;
+// periodsCompleted value at which DRUM_BREAK_STARTS_ON_LAP begins - pulled
+// out to its own name for the same reason as ECHO_VOICE_PERIODS_THRESHOLD
+// below: getVisualProgress uses it as the zero point its own 0-1 fade
+// climbs from (rather than plain periodsCompleted 0), so a purely visual
+// effect gated on that progress (Renderer's bokeh wash/fluid sim) starts
+// fading in at exactly the same instant the drum break itself kicks in,
+// rather than already being partway faded in by then.
+const DRUM_BREAK_PERIODS_THRESHOLD = (DRUM_BREAK_STARTS_ON_LAP - 1) * PROGRESSION.length;
 // periodsCompleted value at which ECHO_VOICE_STARTS_ON_LAP begins - pulled
 // out to its own name since both playThrow (to actually start the echo
 // voice) and getVisualProgress (so a caller can fade a purely visual effect
@@ -240,11 +248,24 @@ export default class Soundtrack {
      * refuse to actually produce sound from an AudioContext until one
      * happens, so this alone doesn't guarantee audio, but nothing will play
      * at all without it.
+     *
+     * Returns a promise that resolves once the context has actually left
+     * 'suspended' (or resolves immediately if there was never anything to
+     * resume) - context.resume() itself is async, and callers whose very
+     * first sound follows right on its heels (see App.startDemo/startGame,
+     * where the demo's first beat/throw fires on literally the next
+     * animation frame) need to await that before scheduling anything: a
+     * playTone/playKick's `now` is read from context.currentTime, which is
+     * frozen while still 'suspended', so scheduling against it before
+     * resume() has actually settled is what reads as the very first note
+     * getting silently dropped or clipped once the context does wake up.
      */
     resume() {
-        if (this.context && this.context.state === 'suspended') {
-            this.context.resume().catch(() => {});
+        if (!this.context) return Promise.resolve();
+        if (this.context.state === 'suspended') {
+            return this.context.resume().catch(() => {});
         }
+        return Promise.resolve();
     }
 
     isMuted() {
@@ -269,17 +290,33 @@ export default class Soundtrack {
     }
 
     /**
-     * 0 (fresh start/just reset) to 1 (ECHO_VOICE_STARTS_ON_LAP reached),
-     * climbing linearly with periodsCompleted in between - exposed so a
-     * purely visual "reward for staying clean" effect (see Renderer's
-     * bokeh wash/Game/App's bokehIntensity) can fade in over exactly the
-     * same clean run the echo voice itself builds up over, landing fully
-     * visible at the same instant the echo starts, rather than tracking
-     * its own separate progress.
+     * 0 (still on DRUM_BREAK_STARTS_ON_LAP's own plain lap) to 1
+     * (ECHO_VOICE_STARTS_ON_LAP reached), climbing linearly in between -
+     * exposed so a purely visual "reward for staying clean" effect (see
+     * Renderer's bokeh wash/fluid sim, Game/App's bokehIntensity) can fade
+     * in over exactly the same clean run the echo voice itself builds up
+     * over, *starting* at the same instant the drum break does and landing
+     * fully visible at the same instant the echo voice does - rather than
+     * (as a flat periodsCompleted/ECHO_VOICE_PERIODS_THRESHOLD would)
+     * already being partway faded in by the time anything is actually
+     * gated on this to become visible.
+     *
+     * `fractionalPeriodProgress` (0-1, how far into the *current*, not-yet-
+     * counted period the caller's own beat/throw clock already is - see
+     * Game.getBokehIntensity/App.buildDemoRenderState, both of which
+     * already compute and pass this) is what keeps this climbing
+     * continuously beat-to-beat rather than only ticking in whole steps
+     * once per full period whenever periodsCompleted itself changes -
+     * without it, progress sits at exactly 0 for the entirety of the lap
+     * where the drum break actually starts (periodsCompleted hasn't
+     * incremented again yet), which reads as a delay before the effect
+     * appears at all, not a fade beginning right on cue.
      */
-    getVisualProgress() {
-        if (ECHO_VOICE_PERIODS_THRESHOLD <= 0) return 1;
-        return Math.min(1, this.periodsCompleted / ECHO_VOICE_PERIODS_THRESHOLD);
+    getVisualProgress(fractionalPeriodProgress = 0) {
+        const span = ECHO_VOICE_PERIODS_THRESHOLD - DRUM_BREAK_PERIODS_THRESHOLD;
+        if (span <= 0) return 1;
+        const progress = this.periodsCompleted + fractionalPeriodProgress - DRUM_BREAK_PERIODS_THRESHOLD;
+        return Math.max(0, Math.min(1, progress / span));
     }
 
     /**
@@ -299,7 +336,7 @@ export default class Soundtrack {
         if (!this.context) return;
         const now = this.context.currentTime;
 
-        if (this.periodsCompleted < (DRUM_BREAK_STARTS_ON_LAP - 1) * PROGRESSION.length) {
+        if (this.periodsCompleted < DRUM_BREAK_PERIODS_THRESHOLD) {
             this.playEchoKick(now, beatDurationSeconds);
             return;
         }
@@ -552,7 +589,7 @@ export default class Soundtrack {
     advancePeriod() {
         this.progressionIndex = (this.progressionIndex + 1) % PROGRESSION.length;
         this.periodsCompleted += 1;
-        if (this.periodsCompleted === (DRUM_BREAK_STARTS_ON_LAP - 1) * PROGRESSION.length) {
+        if (this.periodsCompleted === DRUM_BREAK_PERIODS_THRESHOLD) {
             this.drumBreakMeasureIndex = 0;
         }
     }

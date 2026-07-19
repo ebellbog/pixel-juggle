@@ -1,3 +1,23 @@
+import FluidSimulation from './FluidSimulation.js';
+
+// A soft, colored background wash driven by the balls' own motion - either
+// a real GPU fluid simulation (see FluidSimulation.js) if this device
+// supports it, or else the older, hand-animated "bokeh" blobs below (see
+// drawBokeh) as a fallback. Both take the same `{ id, x, y, color }[]`
+// screen-space balls array (see `draw`), so which one is actually active
+// is invisible to the rest of this file - and to Game/App, which just
+// keep computing `bokehIntensity` exactly as before, now consumed only
+// here in `draw` as a plain compositing-time alpha (see FLUID_MAX_OPACITY)
+// rather than passed into either effect directly.
+const FLUID_MAX_OPACITY = 0.27;
+// How much of the gap between the displayed and the real (but staircase-
+// stepped - see displayedIntensity above) intensity closes per second -
+// an exponential ease, the same trick BOKEH_FOLLOW_TIME_CONSTANT below
+// uses for blob position. Comfortably longer than a beat at any BPM this
+// game supports, so every step gets smoothed away, but still short next
+// to how many seconds/beats the whole fade-in/out actually spans.
+const INTENSITY_FOLLOW_TIME_CONSTANT = 0.4;
+//
 // Soft, blurred, additively-blended color blobs drawn behind everything
 // else (see drawBokeh) - a screensaver-like "bokeh" field, one blob per
 // ball, that eases toward each ball's actual position rather than
@@ -37,12 +57,15 @@ const BOKEH_PULSE_PHASE_STEP_RADIANS = 2.39996;
 // Balls' actual screen-space horizontal range is only as wide as the
 // juggling pattern itself, which sits well short of the screen's full
 // width - most of a ball's real motion is fairly central. Multiplying a
-// blob's horizontal offset from screen-center by this much lets the
-// *color field* swing all the way out to both edges even though the balls
-// producing it never do, rather than leaving the sides of the screen
-// permanently bare. Vertical motion is left alone - throws already cover
-// most of the screen's height on their own.
-const BOKEH_HORIZONTAL_SPREAD_SCALE = 2.2;
+// ball's horizontal offset from screen-center by this much, only for
+// bokeh (see `draw`), lets *its* color field swing all the way out to
+// both edges even though the balls producing it never do, rather than
+// leaving the sides of the screen permanently bare. Vertical motion is
+// left alone - throws already cover most of the screen's height on their
+// own. The fluid sim doesn't need this - it gets each ball's true
+// position and relies on its own ripple physics to spread outward
+// instead (see FluidSimulation).
+const BACKGROUND_HORIZONTAL_SPREAD_SCALE = 2.2;
 // Radial-gradient inner stop, as a fraction of a blob's own (current)
 // radius - within this innermost circle the color sits at full computed
 // alpha; outside it, alpha eases down to 0 by the outer radius. Small on
@@ -68,6 +91,21 @@ const BOKEH_FOLLOW_TIME_CONSTANT = 0.5;
 const BOKEH_SPEED_SMOOTHING_SECONDS = 0.12;
 const BOKEH_MAX_DT = 0.1; // Matches App/Game's own big-frame-gap clamp.
 
+// Small, tight drop shadow drawn just behind/under each ball (see draw's
+// ball-fill loop) - colored to exactly match the page's own background
+// (this.background, i.e. @bg) rather than a generic translucent black, and
+// deliberately understated (barely any blur, a small offset) rather than
+// soft/diffuse like the bokeh/fluid wash it sits on top of. Balls now sit
+// on a busy, colorful, moving background instead of a flat fill, so a
+// solid, opaque shadow in the *exact* page background color is what reads
+// as "the ball is casting a shadow onto solid ground", helping it read as
+// a distinct foreground object rather than blending into the wash. Ratios
+// (not fixed px) of the ball's own screen radius, so this stays
+// proportionate at any zoom/camera scale - first guess, meant to be tuned
+// live once it's on screen.
+const BALL_SHADOW_BLUR_RATIO = 0.1;
+const BALL_SHADOW_OFFSET_Y_RATIO = 0.25;
+
 /** '#rrggbb' -> {r, g, b} - every ball color (see Ball.js's PALETTE) is already exactly this shape. */
 function hexToRgb(hex) {
     const value = parseInt(hex.slice(1), 16);
@@ -90,6 +128,12 @@ export default class Renderer {
         this.cssHeight = 0;
         this.camera = { scale: 1, centerX: 0, centerY: 0 };
 
+        // Preferred background effect - null on any device/browser that
+        // can't do WebGL2 + floating-point render targets, in which case
+        // `draw` falls back to drawBokeh below instead. See
+        // FluidSimulation.tryCreate for exactly what's being checked.
+        this.fluid = FluidSimulation.tryCreate();
+
         // Per-ball-id bokeh tracking state (see drawBokeh), keyed by the
         // `id` on each state.balls entry - persists across frames/draw()
         // calls so a blob's lag and speed-smoothing carry over smoothly,
@@ -106,6 +150,15 @@ export default class Renderer {
         // it entirely rather than offering a reduced variant.
         this.reducedMotion = typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // Eased copy of state.bokehIntensity - see `draw`. Game/App only
+        // ever recompute the real value at discrete moments (each
+        // beat/throw), not continuously, so using it directly produces a
+        // visible staircase (one small jump per beat, held flat in
+        // between) rather than a continuous fade - easing toward it here,
+        // once, smooths that out for both background effects.
+        this.displayedIntensity = 0;
+        this.lastIntensityTime = null;
     }
 
     /** Match the backing store to the display size (accounting for DPR). */
@@ -117,6 +170,13 @@ export default class Renderer {
         this.canvas.width = Math.round(rect.width * dpr);
         this.canvas.height = Math.round(rect.height * dpr);
         this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // The fluid sim's own offscreen canvas is sized in CSS pixels, not
+        // device pixels - it's a heavily blurred/subdued background wash,
+        // so letting `draw`'s ctx.drawImage do one cheap bilinear upscale
+        // to the real backing store is not worth doubling (or more) the
+        // GPU cost of every simulation pass to render at full DPR.
+        this.fluid?.resize(this.cssWidth, this.cssHeight);
     }
 
     /** Fit the given world-space extent into the viewport, preserving aspect. */
@@ -206,6 +266,10 @@ export default class Renderer {
      * (see Soundtrack.getVisualProgress, which both derive it from so this
      * lands "fully on" at the exact same moment the soundtrack's own echo
      * voice kicks in).
+     *
+     * `balls` is already screen-space (`{ id, x, y, color }[]`, with the
+     * horizontal spread already applied - see `draw`), not the raw
+     * world-space entries `state.balls` itself contains.
      */
     drawBokeh(balls, intensity = 1) {
         const now = performance.now();
@@ -224,7 +288,6 @@ export default class Renderer {
         const baseRadius = Math.min(this.cssWidth, this.cssHeight) * BOKEH_BASE_RADIUS_RATIO;
         const followRate = 1 - Math.exp(-dt / BOKEH_FOLLOW_TIME_CONSTANT);
         const speedSmoothingRate = dt > 0 ? Math.min(1, dt / BOKEH_SPEED_SMOOTHING_SECONDS) : 0;
-        const centerX = this.cssWidth / 2;
 
         ctx.save();
         ctx.filter = `blur(${BOKEH_BLUR_PX}px)`;
@@ -234,11 +297,8 @@ export default class Renderer {
         for (const ball of balls) {
             if (ball.id == null) continue;
             seenIds.add(ball.id);
-            const screen = this.worldToScreen(ball.x, ball.y);
-            // The blob's own target position, not the ball's real screen
-            // position - see BOKEH_HORIZONTAL_SPREAD_SCALE above.
-            const targetX = centerX + (screen.x - centerX) * BOKEH_HORIZONTAL_SPREAD_SCALE;
-            const targetY = screen.y;
+            const targetX = ball.x;
+            const targetY = ball.y;
 
             let blob = this.bokehBlobs.get(ball.id);
             if (!blob) {
@@ -300,10 +360,71 @@ export default class Renderer {
         ctx.fillStyle = this.background;
         ctx.fillRect(0, 0, this.cssWidth, this.cssHeight);
 
+        // True screen-space ball positions, shared by both effects -
+        // computed once here rather than by whichever is actually active.
+        const screenBalls = state.balls.map((ball) => {
+            const screen = this.worldToScreen(ball.x, ball.y);
+            return { id: ball.id, x: screen.x, y: screen.y, color: ball.color };
+        });
+
+        // Game/App only recompute bokehIntensity at discrete beat/throw
+        // moments, so used directly it's a staircase (flat, then a small
+        // jump, repeated) - ease toward it continuously instead, once,
+        // here, shared by both effects (see INTENSITY_FOLLOW_TIME_CONSTANT
+        // and displayedIntensity).
+        const rawIntensity = state.bokehIntensity ?? 1;
+        const intensityNow = performance.now();
+        const intensityDt = this.lastIntensityTime != null
+            ? Math.min((intensityNow - this.lastIntensityTime) / 1000, BOKEH_MAX_DT)
+            : 0;
+        this.lastIntensityTime = intensityNow;
+        const intensityFollowRate = 1 - Math.exp(-intensityDt / INTENSITY_FOLLOW_TIME_CONSTANT);
+        this.displayedIntensity += (rawIntensity - this.displayedIntensity) * intensityFollowRate;
+
         // Drawn immediately after the flat background fill, before
         // anything else - a background layer the rest of the scene sits on
-        // top of, not a glow added on top of it (see drawBokeh).
-        this.drawBokeh(state.balls, state.bokehIntensity);
+        // top of, not a glow added on top of it (see FluidSimulation,
+        // drawBokeh).
+        if (this.fluid) {
+            // Gates whether the sim runs at all this frame on the *raw*
+            // (unsmoothed) intensity, not displayedIntensity - so the
+            // simulation itself only starts building up its own swirl
+            // right as the fade-in genuinely begins (which, per
+            // Soundtrack.getVisualProgress, is also exactly when the drum
+            // break itself kicks in - see there), rather than having
+            // already reached a fully-developed steady state underneath
+            // by the time displayedIntensity's smoothing catches up and
+            // alpha becomes visible (see FluidSimulation.render's doc
+            // comment for why `active` and alpha-scaling are handled so
+            // differently here).
+            this.fluid.render(screenBalls, rawIntensity > 0);
+
+            // The fade-in/out itself lives entirely here, as a plain
+            // output-side alpha, also capped well below fully opaque even
+            // once fully faded in - this effect reads as *much* too
+            // intense at alpha 1. 'lighter' (additive) blending, rather
+            // than the default source-over, is what makes the sim's own
+            // background - which is not this page's actual @bg color -
+            // disappear into ours: adding black on top of an opaque pixel
+            // is a no-op, so only the actual colored dye ever visibly
+            // contributes.
+            ctx.save();
+            ctx.globalAlpha = this.displayedIntensity * FLUID_MAX_OPACITY;
+            ctx.globalCompositeOperation = 'lighter';
+            ctx.drawImage(this.fluid.canvas, 0, 0, this.cssWidth, this.cssHeight);
+            ctx.restore();
+        } else {
+            // Bokeh (unlike the fluid sim) has no ripple physics of its
+            // own to spread color outward from each ball's true position -
+            // it needs the horizontal spread baked into the position fed
+            // to it instead (see BACKGROUND_HORIZONTAL_SPREAD_SCALE).
+            const centerX = this.cssWidth / 2;
+            const spreadBalls = screenBalls.map((ball) => ({
+                ...ball,
+                x: centerX + (ball.x - centerX) * BACKGROUND_HORIZONTAL_SPREAD_SCALE,
+            }));
+            this.drawBokeh(spreadBalls, this.displayedIntensity);
+        }
 
         // Trails are drawn before the balls so they read as a fading tail
         // behind each one, not a preview of where it's about to go. Each
@@ -374,14 +495,19 @@ export default class Renderer {
             ctx.restore();
         }
 
+        ctx.save();
+        ctx.shadowColor = this.background;
         for (const ball of state.balls) {
             const screen = this.worldToScreen(ball.x, ball.y);
             const radius = ball.radius * this.camera.scale;
+            ctx.shadowBlur = radius * BALL_SHADOW_BLUR_RATIO;
+            ctx.shadowOffsetY = radius * BALL_SHADOW_OFFSET_Y_RATIO;
             ctx.beginPath();
             ctx.arc(screen.x, screen.y, radius, 0, Math.PI * 2);
             ctx.fillStyle = ball.color;
             ctx.fill();
         }
+        ctx.restore();
 
         if (state.wedges) {
             for (const wedge of state.wedges) {

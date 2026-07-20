@@ -126,11 +126,18 @@ function hexToRgb(hex) {
  * touching the physics. World space has y up; screen space has y down.
  */
 export default class Renderer {
-    constructor(canvas, { background = '#12121f', padding = 0.12 } = {}) {
+    constructor(canvas, { background = '#12121f', padding = 0.12, settings = null } = {}) {
         this.canvas = canvas;
         this.ctx = canvas.getContext('2d');
         this.background = background;
         this.padding = padding;
+        // Player's backgroundEffect preference (see Settings.js) - read
+        // fresh every draw() rather than cached, so a change made from the
+        // settings modal mid-demo/game takes effect on the very next
+        // frame. Null (no settings passed at all - not currently expected,
+        // but keeps this class usable standalone) behaves exactly like the
+        // default 'fluid'.
+        this.settings = settings;
 
         this.cssWidth = 0;
         this.cssHeight = 0;
@@ -167,6 +174,30 @@ export default class Renderer {
         // once, smooths that out for both background effects.
         this.displayedIntensity = 0;
         this.lastIntensityTime = null;
+    }
+
+    /**
+     * Clears every bit of background-wash state that shouldn't carry over
+     * from a previous demo/game run into a fresh one - this Renderer
+     * instance lives for the whole page, reused across every "Show me"/
+     * "Let me try!" start and restart (see App/Game), so without this,
+     * displayedIntensity keeps chasing whatever the *previous* run's own
+     * bokehIntensity had climbed to. Since a fresh run's real intensity
+     * starts back at 0 (see Soundtrack.resetProgression), that leftover
+     * high value reads as the wash popping in fully visible and fading
+     * down to (near) nothing before climbing back up on its own -
+     * particularly obvious with the bokeh fallback, whose blobs are
+     * plainly visible the instant they're drawn, unlike the fluid sim's
+     * own gradual build-up. Called wherever a demo/game actually
+     * (re)starts (see App.startDemo/restart, Game.start/restart).
+     */
+    resetIntensity() {
+        this.displayedIntensity = 0;
+        this.lastIntensityTime = null;
+        this.bokehBlobs.clear();
+        this.lastBokehTime = null;
+        this.bokehElapsedSeconds = 0;
+        this.fluid?.reset();
     }
 
     /** Match the backing store to the display size (accounting for DPR). */
@@ -392,11 +423,24 @@ export default class Renderer {
         const intensityFollowRate = 1 - Math.exp(-intensityDt / intensityTimeConstant);
         this.displayedIntensity += (rawIntensity - this.displayedIntensity) * intensityFollowRate;
 
+        // Player's own preference (see Settings.js/App.applySetting) - 'off'
+        // skips both effects outright; 'bokeh' forces the fallback even on
+        // a device that could run the real fluid sim; plain 'fluid' (the
+        // default) behaves exactly as before, i.e. fluid where supported,
+        // bokeh otherwise. Switching *away* from 'fluid' resets the sim
+        // once, right when the setting actually changes (see
+        // App.applySetting), so it isn't still fed frames here - it just
+        // sits blank for as long as some other effect stays selected,
+        // ready to start clean whenever 'fluid' is picked again.
+        const effectSetting = this.settings?.get('backgroundEffect') ?? 'fluid';
+        const useFluid = effectSetting === 'fluid' && !!this.fluid;
+        const useBokeh = effectSetting === 'bokeh' || (effectSetting === 'fluid' && !this.fluid);
+
         // Drawn immediately after the flat background fill, before
         // anything else - a background layer the rest of the scene sits on
         // top of, not a glow added on top of it (see FluidSimulation,
         // drawBokeh).
-        if (this.fluid) {
+        if (useFluid) {
             // Gates whether the sim runs at all this frame on the *raw*
             // (unsmoothed) intensity, not displayedIntensity - so the
             // simulation itself only starts building up its own swirl
@@ -424,7 +468,7 @@ export default class Renderer {
             ctx.globalCompositeOperation = 'lighter';
             ctx.drawImage(this.fluid.canvas, 0, 0, this.cssWidth, this.cssHeight);
             ctx.restore();
-        } else {
+        } else if (useBokeh) {
             // Bokeh (unlike the fluid sim) has no ripple physics of its
             // own to spread color outward from each ball's true position -
             // it needs the horizontal spread baked into the position fed
@@ -435,6 +479,11 @@ export default class Renderer {
                 x: centerX + (ball.x - centerX) * BACKGROUND_HORIZONTAL_SPREAD_SCALE,
             }));
             this.drawBokeh(spreadBalls, this.displayedIntensity);
+        } else {
+            // 'off' - no background wash at all. Still drop any tracked
+            // blob state so a later switch back to 'bokeh' doesn't briefly
+            // resume from stale positions/speeds.
+            this.bokehBlobs.clear();
         }
 
         // Trails are drawn before the balls so they read as a fading tail
@@ -618,7 +667,7 @@ export default class Renderer {
                 } else if (cancelFlash) {
                     fillStyle = 'rgba(210, 50, 50, 0.92)';
                 } else if (lit && locked) {
-                    fillStyle = `rgba(240, 210, 50, ${Math.max(0.45, 1 - ring * 0.15).toFixed(3)})`;
+                    fillStyle = `rgba(240, 210, 50, ${Math.max(0.38, 1 - ring * 0.20).toFixed(3)})`;
                 } else if (lit) {
                     fillStyle = `rgba(255, 255, 255, ${Math.max(0.4, 1 - ring * 0.15).toFixed(3)})`;
                 }

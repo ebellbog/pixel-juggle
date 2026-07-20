@@ -24,9 +24,8 @@
 // matches the screen's actual shape.
 const SIM_RESOLUTION = 128;
 // Resolution for the visible color field - decoupled from SIM_RESOLUTION
-// (same trick the reference demo linked in chat uses) so trails stay
-// reasonably crisp on screen without paying full resolution on the
-// iterative pressure solve.
+// (same trick the reference demo uses) so trails stay reasonably crisp on
+// screen without paying full resolution on the iterative pressure solve.
 const DYE_RESOLUTION = 512;
 // Jacobi iterations per frame solving the pressure Poisson equation - more
 // gives a more accurate (less "blobby"/compressible-looking) projection at

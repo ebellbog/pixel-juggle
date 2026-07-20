@@ -85,7 +85,7 @@ const BEAT_FLASH_MS = 180;
  * lives there.
  */
 export default class Game {
-    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap, $streakValue, $maxStreakValue, soundtrack }) {
+    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap, $streakValue, $maxStreakValue, soundtrack, settings }) {
         this.renderer = renderer;
         this.$beatBar = $beatBar;
         this.$beatBarWrap = $beatBarWrap;
@@ -97,6 +97,11 @@ export default class Game {
         // public methods is already a safe no-op on its own if Web Audio
         // isn't available, so there's nothing to null-check here.
         this.soundtrack = soundtrack;
+        // Player's inputType preference (see Settings.js) - read fresh on
+        // every press (see isTapMode/handleThrowStart) rather than cached,
+        // so switching modes from the settings modal mid-game takes effect
+        // on the very next press rather than needing a restart.
+        this.settings = settings;
         // Only read for isSync (see ThrowHeight.getAvailableHeights/
         // buildWedgeState) - sync's wedge ladders and labels work
         // differently than vanilla's (every height is even; crossing is an
@@ -268,6 +273,7 @@ export default class Game {
     restart() {
         this.resetState();
         this.soundtrack.stopAll();
+        this.renderer.resetIntensity();
         this.$beatBar.css('transform', 'scaleX(1)');
         this.draw();
     }
@@ -342,6 +348,7 @@ export default class Game {
     }
 
     start() {
+        this.renderer.resetIntensity();
         this.renderer.fit(this.extent);
         this.$beatBar.css('transform', 'scaleX(1)');
         this.$beatBarWrap.removeClass('hidden');
@@ -360,16 +367,31 @@ export default class Game {
         this.physics.setBpm(bpm);
     }
 
+    /** True when the player's inputType preference (see Settings.js) is 'tap' rather than the default 'hold'. */
+    isTapMode() {
+        return this.settings?.get('inputType') === 'tap';
+    }
+
     /**
-     * Starts charging a throw for `hand`. If a yellow locked throw is
-     * already waiting on this hand, pressing again clears it and starts
-     * fresh from the lowest height. If this hand has no ball queued and
-     * none will land in time for the throw to resolve (see
-     * computeTargetState), there's nothing to throw even in principle, so
-     * the wedge shows red for as long as the key stays held (see
-     * dangerHold) instead of charging up to a throw that's certain to fail.
+     * Starts charging a throw for `hand` (hold mode), or advances its
+     * cycle by one ring (tap mode - see handleTapThrow) - either way,
+     * dispatched fresh on every physical press (KeyboardInput already
+     * filters out OS key-repeat while a key stays held - see there), so
+     * switching modes between presses just changes which of the two this
+     * routes to. If a yellow locked throw is already waiting on this hand,
+     * pressing again in hold mode clears it and starts fresh from the
+     * lowest height. If this hand has no ball queued and none will land in
+     * time for the throw to resolve (see computeTargetState), there's
+     * nothing to throw even in principle, so the wedge shows red for as
+     * long as the key stays held (see dangerHold) instead of charging up
+     * to a throw that's certain to fail.
      */
     handleThrowStart({ hand, crossing }) {
+        if (this.isTapMode()) {
+            this.handleTapThrow(hand, crossing);
+            return;
+        }
+
         if (this.lockedThrow[hand]) this.lockedThrow[hand] = null;
         if (this.charging[hand]) return;
         const heights = crossing ? this.crossHeights : this.selfHeights;
@@ -382,6 +404,40 @@ export default class Game {
 
         this.dangerHold[hand] = null;
         this.charging[hand] = { crossing, startWallTime: performance.now() };
+    }
+
+    /**
+     * Tap mode's alternative to the hold-to-charge flow above: rather than
+     * opening a timed charge window, each press immediately locks in a
+     * height, waiting for the next beat exactly like a released hold does
+     * (see resolveBeatThrow) - there's no charging/timing state at all in
+     * this mode, so getChargeState/updateChargeTicks simply never see this
+     * hand active (this.charging stays untouched). Pressing again on the
+     * same hand and side before that throw fires advances the locked
+     * height by one ring, wrapping back to the first ring once the
+     * ladder's top is passed; pressing the *other* side, or pressing after
+     * this hand's previous throw already fired, starts fresh at the first
+     * ring instead - the same "fresh press always starts over" rule hold
+     * mode's handleThrowStart applies to its own charge.
+     */
+    handleTapThrow(hand, crossing) {
+        const heights = crossing ? this.crossHeights : this.selfHeights;
+        if (heights.length === 0) return;
+
+        if (!this.computeTargetState(hand).valid) {
+            this.dangerHold[hand] = { crossing };
+            this.lockedThrow[hand] = null;
+            return;
+        }
+
+        this.dangerHold[hand] = null;
+        const existing = this.lockedThrow[hand];
+        const litRings = existing && existing.crossing === crossing
+            ? (existing.litRings % heights.length) + 1
+            : 1;
+        this.lockedThrow[hand] = { crossing, height: heights[litRings - 1], litRings };
+        this.soundtrack.playChargeTick(litRings);
+        this.draw();
     }
 
     /**

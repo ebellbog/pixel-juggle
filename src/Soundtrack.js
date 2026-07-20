@@ -1,5 +1,3 @@
-const MUTED_STORAGE_KEY = 'pixel-juggle-muted';
-
 // Major pentatonic (no two degrees a semitone or tritone apart), so any
 // sequence of throw heights - in whatever order the player or a pattern
 // happens to produce them - lands on notes that sound musical together
@@ -209,7 +207,11 @@ const DRUM_BREAK_MEASURES = [
  * catch time (see playThrow).
  */
 export default class Soundtrack {
-    constructor() {
+    constructor({ settings } = {}) {
+        // Live player prefs for per-category sound gating (see
+        // isSoundCategoryEnabled) - the in-game mute button is separate
+        // and only ducks master gain without touching these.
+        this.settings = settings;
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
         // 'playback' (a bigger, more conservative output buffer) rather
         // than the default 'interactive' - this game never needs the
@@ -238,13 +240,7 @@ export default class Soundtrack {
         // number that may not evenly suit this device's actual hardware.
         this.context = AudioContextClass ? new AudioContextClass({ latencyHint: 'playback' }) : null;
 
-        let mutedByDefault = false;
-        try {
-            mutedByDefault = window.localStorage?.getItem(MUTED_STORAGE_KEY) === '1';
-        } catch {
-            // Storage access can throw in some private-browsing modes - just start unmuted.
-        }
-        this.muted = mutedByDefault;
+        this.muted = false;
         // Index into PROGRESSION - which chord the pattern's *current*
         // period is playing in (see advancePeriod/frequencyForThrow).
         this.progressionIndex = 0;
@@ -352,16 +348,28 @@ export default class Soundtrack {
         if (this.masterGain) {
             this.masterGain.gain.setTargetAtTime(muted ? 0 : 1, this.context.currentTime, 0.02);
         }
-        try {
-            window.localStorage?.setItem(MUTED_STORAGE_KEY, muted ? '1' : '0');
-        } catch {
-            // Private browsing etc - losing the preference on reload isn't worth failing over.
-        }
     }
 
     toggleMuted() {
         this.setMuted(!this.muted);
         return this.muted;
+    }
+
+    /**
+     * Whether a sound category is allowed to play right now (see
+     * playBeat/playThrow/playChargeTick). The in-game mute button is
+     * handled separately via master gain - these persisted toggles stay
+     * unchanged while muted and apply again on unmute.
+     */
+    isSoundCategoryEnabled(category) {
+        if (!this.settings) return true;
+        const keys = {
+            percussion: 'soundPercussion',
+            throwTones: 'soundThrowTones',
+            buttons: 'soundButtons',
+        };
+        const key = keys[category];
+        return key ? this.settings.get(key) === 'on' : true;
     }
 
     /**
@@ -408,7 +416,7 @@ export default class Soundtrack {
      * regardless of BPM.
      */
     playBeat(beatDurationSeconds) {
-        if (!this.context) return;
+        if (!this.context || !this.isSoundCategoryEnabled('percussion')) return;
         const now = this.context.currentTime;
 
         if (this.periodsCompleted < DRUM_BREAK_PERIODS_THRESHOLD) {
@@ -585,7 +593,7 @@ export default class Soundtrack {
      * of climbing height without having to look at the wedge at all.
      */
     playChargeTick(ringIndex) {
-        if (!this.context) return;
+        if (!this.context || !this.isSoundCategoryEnabled('buttons')) return;
         const now = this.context.currentTime;
         const frequency = CHARGE_TICK_BASE_HZ * 2 ** ((ringIndex - 1) * CHARGE_TICK_SEMITONES_PER_RING / 12);
 
@@ -623,7 +631,7 @@ export default class Soundtrack {
      * still fades out at that same catch time, not later.
      */
     playThrow({ hand, height, durationSeconds }) {
-        if (!this.context || !(durationSeconds > 0)) return;
+        if (!this.context || !(durationSeconds > 0) || !this.isSoundCategoryEnabled('throwTones')) return;
         const frequency = this.frequencyForThrow(hand, height);
         this.playTone(frequency, durationSeconds);
         if (this.periodsCompleted >= ECHO_VOICE_PERIODS_THRESHOLD) {

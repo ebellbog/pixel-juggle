@@ -88,6 +88,45 @@
                 <span class="material-symbols-outlined" aria-hidden="true">close</span>
             </button>
         </div>
+
+        <!-- Settings modal - toggled by #settings-button, visible in every
+             mode (see App.openSettings/closeSettings). -->
+        <div id="settings-overlay" class="hidden">
+            <div id="settings-modal">
+                <button id="settings-close-button" class="icon-button" title="Close">
+                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                </button>
+                <h2 id="settings-title">Settings</h2>
+
+                <div class="settings-group">
+                    <div class="settings-group-label">Height control</div>
+                    <div class="settings-option-row" data-setting="inputType">
+                        <button type="button" class="settings-option" data-value="hold">Hold</button>
+                        <button type="button" class="settings-option" data-value="tap">Tap</button>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <div class="settings-group-label">Background effects</div>
+                    <div class="settings-option-row" data-setting="backgroundEffect">
+                        <button type="button" class="settings-option" data-value="fluid">Fluid</button>
+                        <button type="button" class="settings-option" data-value="bokeh">Bokeh</button>
+                        <button type="button" class="settings-option" data-value="off">Off</button>
+                    </div>
+                </div>
+
+                <div class="settings-group">
+                    <div class="settings-group-label">Sound effects</div>
+                    <div class="settings-toggle-row">
+                        <button type="button" class="settings-toggle" data-setting="soundPercussion">Beats</button>
+                        <button type="button" class="settings-toggle" data-setting="soundThrowTones">Throws</button>
+                        <button type="button" class="settings-toggle" data-setting="soundButtons">UI</button>
+                    </div>
+                </div>
+
+                <button id="settings-reset-button" class="text-button">Reset to defaults</button>
+            </div>
+        </div>
     </div>
 </body>
 

@@ -10,7 +10,7 @@
 @orb-bottom: #911eb4;
 @orb-picker: #42d4f4;
 
-@accent: desaturate(@orb-picker, 40%); //  #ffaef1;
+@accent: desaturate(@orb-picker, 65%);
 
 @border-radius-small: 4px;
 
@@ -23,6 +23,15 @@
     font-size: 15px;
     color: fade(@text, 60%);
     text-transform: uppercase;
+}
+
+// Section labels on form-like UI ("Choose a pattern:" on the title screen,
+// setting names in the settings modal - see .settings-group-label).
+.form-label-style() {
+    font-family: 'Asimovian', monospace;
+    font-size: 13px;
+    letter-spacing: .2px;
+    opacity: .7;
 }
 
 html,
@@ -252,11 +261,7 @@ body.mode-game {
         text-align: left;
         margin-left: 3px;
         margin-bottom: 4px;
-
-        font-family: 'Asimovian', monospace;
-        font-size: 13px;
-        letter-spacing: .2px;
-        opacity: .7;
+        .form-label-style();
     }
 }
 
@@ -699,4 +704,114 @@ body.mode-game {
 
 #restart-button:hover {
     color: @orb-top;
+}
+
+// --- Settings modal ------------------------------------------------------
+
+#settings-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background-color: fade(black, 75%);
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+
+    &:not(.hidden) {
+        display: flex;
+    }
+}
+
+#settings-modal {
+    position: relative;
+    width: 400px;
+    max-width: calc(100vw - 48px);
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 32px 28px 28px;
+    background-color: @bg;
+    border: 1px solid white;
+    border-radius: @border-radius-small;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+    #settings-close-button {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+
+        .material-symbols-outlined {
+            font-size: 26px;
+        }
+    }
+}
+
+#settings-title {
+    margin: 0 0 24px;
+    font-family: 'Turret Road', sans-serif;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: .5px;
+    text-align: center;
+}
+
+.settings-group {
+    margin-bottom: 22px;
+}
+
+.settings-group-label {
+    .form-label-style();
+    margin-bottom: 10px;
+}
+
+.settings-option-row,
+.settings-toggle-row {
+    display: flex;
+    gap: 8px;
+}
+
+.settings-option, .settings-toggle {
+    flex: 1;
+    font-family: 'Turret Road', sans-serif;
+    font-size: 13px;
+    font-weight: 400;
+    letter-spacing: .3px;
+    padding: 8px 4px;
+    border: 1px solid #3a3a52;
+    border-radius: @border-radius-small;
+    background-color: #0e0e18;
+    color: fade(@text, 45%);
+    cursor: pointer;
+    transition: all 0.15s ease;
+
+    &:hover {
+        filter: brightness(1.4);
+    }
+
+    &.selected {
+        background-color: darken(white, 20%);
+        color: @bg;
+        font-weight: 700;
+    }
+}
+
+#settings-reset-button {
+    display: block;
+    margin: 26px auto 0;
+}
+
+.text-button {
+    font-family: 'Asimovian', monospace;
+    font-size: 13px;
+    letter-spacing: .3px;
+    background: none;
+    border: none;
+    color: fade(@text, 60%);
+    cursor: pointer;
+    text-decoration: underline;
+    transition: color 0.15s ease;
+
+    &:hover {
+        color: @text;
+    }
 }

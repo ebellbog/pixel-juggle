@@ -4,6 +4,7 @@ import JugglingSimulator from './JugglingSimulator.js';
 import Renderer from './Renderer.js';
 import Game from './Game.js';
 import Soundtrack from './Soundtrack.js';
+import Settings from './Settings.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 
 const DEFAULT_BPM = 60;
@@ -32,6 +33,9 @@ export default class App {
         this.$restartButton = $('#restart-button');
         this.$muteButton = $('#mute-button');
         this.$settingsButton = $('#settings-button');
+        this.$settingsOverlay = $('#settings-overlay');
+        this.$settingsCloseButton = $('#settings-close-button');
+        this.$settingsResetButton = $('#settings-reset-button');
         this.$streakValue = $('#streak-value');
         this.$maxStreakValue = $('#max-streak-value');
         this.$validationIcon = $('#validation-icon');
@@ -41,12 +45,26 @@ export default class App {
         this.$beatBar = $('#beat-bar');
         this.canvas = document.getElementById('juggle-canvas');
 
-        this.renderer = new Renderer(this.canvas);
+        // Persisted player preferences (see Settings.js) - handed by
+        // reference to Renderer (backgroundEffect) and every Game instance
+        // (inputType), which each just read the live value straight off it
+        // rather than needing a change notification (see there).
+        this.settings = new Settings();
+        this.renderer = new Renderer(this.canvas, { settings: this.settings });
+        // Device/browser can't run the real fluid sim at all (see
+        // FluidSimulation.tryCreate/Renderer.fluid) - hide the option
+        // outright rather than leaving a picker that never actually
+        // does anything on this device (see syncSettingsPanel, which
+        // also treats a stored 'fluid' preference as 'bokeh' for
+        // highlighting purposes so nothing appears deselected below).
+        if (!this.renderer.fluid) {
+            $('.settings-option[data-value="fluid"]').addClass('hidden');
+        }
         // Shared for the whole page's life - both the demo's JugglingSimulator
         // and Game get the same instance (see startDemo/startGame), so a mute
         // toggled mid-demo stays muted if the player then switches to "Let me
         // try!" without needing to reconcile two separate mute states.
-        this.soundtrack = new Soundtrack();
+        this.soundtrack = new Soundtrack({ settings: this.settings });
         this.siteswap = null;
         // Only set while the "Show me" demo animation is actually running.
         this.simulator = null;
@@ -69,6 +87,7 @@ export default class App {
         this.handleResize();
         this.setPatternValue(this.patternValue);
         this.updateMuteButton();
+        this.syncSettingsPanel();
     }
 
     buildPatternSelect() {
@@ -193,6 +212,7 @@ export default class App {
         });
         this.$bpmSlider.on('input', () => this.setBpm(Number(this.$bpmSlider.val())));
         $(window).on('resize', () => this.handleResize());
+        this.bindSettingsEvents();
         // 'R' restarts an active demo/game from the keyboard, same as the
         // button (see restart()) - only while one is actually running, and
         // only when the siteswap input isn't focused, so it doesn't hijack
@@ -208,6 +228,93 @@ export default class App {
             if (document.activeElement === this.$input[0]) return;
             event.preventDefault();
             this.restart();
+        });
+    }
+
+    bindSettingsEvents() {
+        this.$settingsButton.on('click', () => this.openSettings());
+        this.$settingsCloseButton.on('click', () => this.closeSettings());
+        // Clicking the darkened backdrop itself (not anything inside the
+        // modal, which stops its own clicks from bubbling here - see
+        // below) closes it too, same as the X.
+        this.$settingsOverlay.on('click', (event) => {
+            if (event.target === this.$settingsOverlay[0]) this.closeSettings();
+        });
+        $(window).on('keydown', (event) => {
+            if (event.key === 'Escape' && !this.$settingsOverlay.hasClass('hidden')) this.closeSettings();
+        });
+
+        this.$settingsOverlay.find('.settings-option-row').on('click', '.settings-option', (event) => {
+            const $row = $(event.currentTarget).closest('.settings-option-row');
+            const key = $row.attr('data-setting');
+            const value = $(event.currentTarget).attr('data-value');
+            this.applySetting(key, value);
+        });
+
+        this.$settingsOverlay.on('click', '.settings-toggle', (event) => {
+            const key = $(event.currentTarget).attr('data-setting');
+            const next = this.settings.get(key) === 'on' ? 'off' : 'on';
+            this.applySetting(key, next);
+        });
+
+        this.$settingsResetButton.on('click', () => {
+            this.settings.resetToDefaults();
+            this.syncSettingsPanel();
+            if (this.settings.get('backgroundEffect') !== 'fluid') {
+                this.renderer.fluid?.reset();
+            }
+        });
+    }
+
+    openSettings() {
+        this.$settingsOverlay.removeClass('hidden');
+    }
+
+    closeSettings() {
+        this.$settingsOverlay.addClass('hidden');
+    }
+
+    /**
+     * Applies one setting change everywhere it needs to take effect
+     * immediately - persisting it (see Settings.set), then updating
+     * whatever's currently on screen so a change made mid-demo/game shows
+     * up right away rather than only after a restart. Renderer/Game
+     * themselves just read settings.get(key) fresh each time they need it
+     * (see there), so the only "push" work here is the parts that cache a
+     * derived value up front rather than re-deriving it every frame:
+     * Renderer's fluid sim needs an explicit reset() when the effect is
+     * switched away from 'fluid' so it doesn't sit there stale, mid-swirl,
+     * for whenever it's switched back on.
+     */
+    applySetting(key, value) {
+        this.settings.set(key, value);
+        this.syncSettingsPanel();
+        if (key === 'backgroundEffect' && value !== 'fluid') {
+            this.renderer.fluid?.reset();
+        }
+    }
+
+    /** Highlights whichever option each setting group's current value matches - called on open and after every change (including reset). */
+    syncSettingsPanel() {
+        this.$settingsOverlay.find('.settings-option-row').each((_, row) => {
+            const $row = $(row);
+            const key = $row.attr('data-setting');
+            let value = this.settings.get(key);
+            // Fluid's own button is hidden on devices that can't run it
+            // (see constructor) - Renderer already falls back to bokeh
+            // behind the scenes for a stored 'fluid' preference on such a
+            // device, so highlight that same fallback here too rather
+            // than leaving nothing selected.
+            if (key === 'backgroundEffect' && value === 'fluid' && !this.renderer.fluid) value = 'bokeh';
+            $row.find('.settings-option')
+                .removeClass('selected')
+                .filter(function () { return $(this).attr('data-value') === value; })
+                .addClass('selected');
+        });
+        this.$settingsOverlay.find('.settings-toggle').each((_, button) => {
+            const $button = $(button);
+            const key = $button.attr('data-setting');
+            $button.toggleClass('selected', this.settings.get(key) === 'on');
         });
     }
 
@@ -314,6 +421,7 @@ export default class App {
         // measures it, or it'd just measure a zero-size box.
         this.setMode('demo');
         this.renderer.resize();
+        this.renderer.resetIntensity();
 
         // A click handler is exactly the user gesture browsers require
         // before an AudioContext is allowed to actually produce sound - see
@@ -415,6 +523,7 @@ export default class App {
                 $streakValue: this.$streakValue,
                 $maxStreakValue: this.$maxStreakValue,
                 soundtrack: this.soundtrack,
+                settings: this.settings,
             });
             this.game.start();
         });
@@ -433,6 +542,7 @@ export default class App {
             this.game.restart();
         } else if (this.simulator) {
             this.soundtrack.stopAll();
+            this.renderer.resetIntensity();
             this.simulator = new JugglingSimulator(this.siteswap, {
                 bpm: this.bpm,
                 onBeat: (beatDurationSeconds, isNewPeriod) => {

@@ -87,6 +87,18 @@ const THROW_PEAK_GAIN = 0.16;
 const THROW_DECAY_FRACTION = 0.94;
 const THROW_FLOOR_RATIO = 0.012; // ~ -38dB below peak
 const MIN_AUDIBLE_GAIN = 0.0001; // exponentialRampToValueAtTime can't target 0 exactly.
+// Every percussion hit below (kick/snare/charge tick) ramps up to its own
+// peak gain over this long, rather than jumping straight there with a
+// single setValueAtTime - a few milliseconds, far too short to read as an
+// actual "attack" the way THROW_ATTACK_SECONDS does, but enough to avoid
+// a hard 0-to-peak *step* in the gain curve. That step is a real
+// discontinuity (a jump in *value*, not just slope), and playing it back
+// through real hardware/headphones is what a plain sine/noise burst
+// starting at anything other than a zero-crossing reads as: a sharp,
+// broadband "tick" or "click" layered on top of the intended sound,
+// exactly the kind of small per-hit artifact headphones make far more
+// audible than speakers do.
+const PERCUSSION_ATTACK_SECONDS = 0.003;
 
 // Two sine layers a few cents apart (rather than one single richer
 // waveform) beat softly against each other for an airy, choral shimmer;
@@ -113,6 +125,11 @@ const KICK_PEAK_GAIN = 1;
 const KICK_SUB_HZ = 36;
 const KICK_SUB_GAIN_RATIO = 0.85; // relative to KICK_PEAK_GAIN
 const KICK_SUB_DECAY_SECONDS = 0.52;
+// Overall volume for a real sample played back in place of the
+// synthesized kick (see loadKickSample/playKick) - a separate knob from
+// KICK_PEAK_GAIN since a recorded sample's own mastered loudness has
+// nothing to do with that synth's particular gain math.
+const KICK_SAMPLE_GAIN = 1;
 // Every beat subdivides into this many quarter-beat kicks, each quieter than
 // the last (KICK_ECHO_DECAY per step) so it reads as one hit echoing and
 // trailing off rather than four equally-loud hits - see playEchoKick. A low
@@ -194,7 +211,32 @@ const DRUM_BREAK_MEASURES = [
 export default class Soundtrack {
     constructor() {
         const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        this.context = AudioContextClass ? new AudioContextClass() : null;
+        // 'playback' (a bigger, more conservative output buffer) rather
+        // than the default 'interactive' - this game never needs the
+        // lowest possible input-to-sound latency 'interactive' is tuned
+        // for (nothing here plays in direct, synchronous response to a
+        // keypress; every sound is scheduled against the context's own
+        // clock ahead of time - see playThrow/playBeat/playKick etc, all
+        // of which take an explicit startTime), but it's now sharing the
+        // page with a real-time WebGL2 fluid simulation (see
+        // FluidSimulation.js/Renderer.js) that can spike main-thread/GPU
+        // load - a bigger buffer gives the audio hardware more breathing
+        // room before an occasional slow frame elsewhere in the page
+        // starves it and reads as an audible dropout/glitch.
+        //
+        // Deliberately *not* an explicit numeric target (tried 0.3, i.e.
+        // 300ms) - that pushed some browsers/platforms into a buffer
+        // size/rate configuration that visibly warped playback speed
+        // (audible "slow down/speed up" - most likely the output device
+        // and this context's own sample rate no longer agreeing,
+        // forcing constant real-time resampling instead of a clean 1:1
+        // match) without even fixing the original Bluetooth click/pop
+        // issue it was meant to help with. 'playback' asks for the same
+        // "prioritize stability over latency" behavior in a way each
+        // browser already knows how to satisfy with a buffer size/rate
+        // combination it's comfortable with, rather than a specific
+        // number that may not evenly suit this device's actual hardware.
+        this.context = AudioContextClass ? new AudioContextClass({ latencyHint: 'playback' }) : null;
 
         let mutedByDefault = false;
         try {
@@ -223,9 +265,28 @@ export default class Soundtrack {
         // reuses the same buffer rather than regenerating random noise data
         // each time, since none of that data's specifics actually matter.
         this.noiseBuffer = null;
+        // Set once loadKickSample resolves - see there/playKick.
+        this.kickSampleBuffer = null;
 
         if (this.context) {
             this.masterGain = this.buildMasterGain();
+            // A single, permanently-running vibrato LFO shared by every
+            // throw voice (see playTone), rather than a fresh oscillator
+            // per throw/echo - it never connects to masterGain/destination
+            // directly, so it's silent on its own, only ever feeding a
+            // per-voice vibratoDepth gain node that connects onward to that
+            // voice's own oscillators' frequency params (fan-out from one
+            // running oscillator to many gain nodes is standard and cheap).
+            // With several balls in flight plus echo voices, playTone can
+            // run several times a second; each of those used to also
+            // create-start-stop its *own* vibrato oscillator for identical
+            // output, pure avoidable audio-graph churn that's exactly the
+            // kind of thing that can read as intermittent static/dropouts
+            // on modest hardware once enough of it piles up per second.
+            this.vibrato = this.context.createOscillator();
+            this.vibrato.type = 'sine';
+            this.vibrato.frequency.value = THROW_VIBRATO_RATE_HZ;
+            this.vibrato.start();
         }
     }
 
@@ -233,11 +294,25 @@ export default class Soundtrack {
     buildMasterGain() {
         const gain = this.context.createGain();
         gain.gain.value = this.muted ? 0 : 1;
-        // A light limiter, not tonal shaping - several throws and a beat
-        // click can land at once (a five-ball pattern, say), and this keeps
-        // that from ever actually clipping instead of asking every voice's
-        // individual gain to guess at worst-case overlap.
+        // A limiter, not tonal shaping - several throws (each already 2
+        // voices once the echo starts), a drum break hit, and a charge
+        // tick can all land within the same few milliseconds of each
+        // other (a five-ball pattern with the echo voice active, say), and
+        // this keeps that from ever actually clipping at the output stage
+        // instead of asking every voice's individual gain to guess at
+        // worst-case overlap. Tuned tighter than the (fairly gentle,
+        // mastering-oriented) defaults specifically for that "catch an
+        // unpredictable pile-up of short percussive/tonal transients"
+        // job - a lower threshold and higher ratio than default so it
+        // engages sooner and squeezes harder once several voices do
+        // stack, which otherwise reads as harsh, static-y clipping rather
+        // than just a briefly quieter mix.
         const compressor = this.context.createDynamicsCompressor();
+        compressor.threshold.value = -18;
+        compressor.knee.value = 6;
+        compressor.ratio.value = 20;
+        compressor.attack.value = 0.002;
+        compressor.release.value = 0.2;
         gain.connect(compressor);
         compressor.connect(this.context.destination);
         return gain;
@@ -364,20 +439,67 @@ export default class Soundtrack {
     }
 
     /**
-     * One kick hit: a pure sine plunging from KICK_START_HZ to KICK_END_HZ
-     * under a matching gain decay for the "thump" transient, plus a second,
-     * fixed-pitch sine (see KICK_SUB_HZ) that lingers a little longer for
-     * the sustained low-end "boom" underneath it - no separate attack
-     * transient on either, just those two decays overlapping.
+     * Fetches and decodes a real audio file (WAV/MP3/OGG - anything
+     * decodeAudioData supports) to stand in for the synthesized kick from
+     * here on (see playKick, which prefers this buffer once it's ready and
+     * keeps synthesizing until then) - e.g. `import kickUrl from
+     * './assets/kick.wav'; soundtrack.loadKickSample(kickUrl);` once a
+     * sample file actually exists in the project (see webpack.config.js's
+     * file-loader rule, which already covers .wav/.mp3/.ogg). Async and
+     * fire-and-forget on purpose: callers don't need to await this before
+     * starting a demo/game, since playKick's fallback covers the gap.
+     * Never throws - a missing/corrupt/unsupported file just leaves the
+     * synthesized kick in place rather than breaking playback outright.
+     */
+    async loadKickSample(url) {
+        if (!this.context) return;
+        try {
+            const response = await fetch(url);
+            const arrayBuffer = await response.arrayBuffer();
+            this.kickSampleBuffer = await this.context.decodeAudioData(arrayBuffer);
+        } catch {
+            // Leave the synthesized kick in place - see doc comment above.
+        }
+    }
+
+    /** A single one-shot sample playback: decoded `buffer` straight through a plain gain node, no filtering/envelope of its own - the recording already has one. */
+    playSample(buffer, startTime, gain) {
+        const source = this.context.createBufferSource();
+        source.buffer = buffer;
+
+        const gainNode = this.context.createGain();
+        gainNode.gain.value = gain;
+
+        source.connect(gainNode);
+        gainNode.connect(this.masterGain);
+        source.start(startTime);
+    }
+
+    /**
+     * One kick hit: if loadKickSample has a real sample ready, just plays
+     * that (scaled by `gainScale`, the same per-echo falloff the
+     * synthesized path below uses - see playEchoKick) instead of
+     * synthesizing anything. Otherwise, a pure sine plunging from
+     * KICK_START_HZ to KICK_END_HZ under a matching gain decay for the
+     * "thump" transient, plus a second, fixed-pitch sine (see KICK_SUB_HZ)
+     * that lingers a little longer for the sustained low-end "boom"
+     * underneath it - no separate attack transient on either beyond
+     * PERCUSSION_ATTACK_SECONDS, just those two decays overlapping.
      */
     playKick(startTime, gainScale) {
+        if (this.kickSampleBuffer) {
+            this.playSample(this.kickSampleBuffer, startTime, KICK_SAMPLE_GAIN * gainScale);
+            return;
+        }
+
         const osc = this.context.createOscillator();
         osc.type = 'sine';
         osc.frequency.setValueAtTime(KICK_START_HZ, startTime);
         osc.frequency.exponentialRampToValueAtTime(KICK_END_HZ, startTime + KICK_PITCH_DROP_SECONDS);
 
         const gain = this.context.createGain();
-        gain.gain.setValueAtTime(KICK_PEAK_GAIN * gainScale, startTime);
+        gain.gain.setValueAtTime(MIN_AUDIBLE_GAIN, startTime);
+        gain.gain.linearRampToValueAtTime(KICK_PEAK_GAIN * gainScale, startTime + PERCUSSION_ATTACK_SECONDS);
         gain.gain.exponentialRampToValueAtTime(MIN_AUDIBLE_GAIN, startTime + KICK_DECAY_SECONDS);
 
         osc.connect(gain);
@@ -390,7 +512,8 @@ export default class Soundtrack {
         sub.frequency.value = KICK_SUB_HZ;
 
         const subGain = this.context.createGain();
-        subGain.gain.setValueAtTime(KICK_PEAK_GAIN * KICK_SUB_GAIN_RATIO * gainScale, startTime);
+        subGain.gain.setValueAtTime(MIN_AUDIBLE_GAIN, startTime);
+        subGain.gain.linearRampToValueAtTime(KICK_PEAK_GAIN * KICK_SUB_GAIN_RATIO * gainScale, startTime + PERCUSSION_ATTACK_SECONDS);
         subGain.gain.exponentialRampToValueAtTime(MIN_AUDIBLE_GAIN, startTime + KICK_SUB_DECAY_SECONDS);
 
         sub.connect(subGain);
@@ -427,7 +550,8 @@ export default class Soundtrack {
         highpass.frequency.value = SNARE_NOISE_HIGHPASS_HZ;
 
         const noiseGain = this.context.createGain();
-        noiseGain.gain.setValueAtTime(SNARE_NOISE_PEAK_GAIN * gainScale, startTime);
+        noiseGain.gain.setValueAtTime(MIN_AUDIBLE_GAIN, startTime);
+        noiseGain.gain.linearRampToValueAtTime(SNARE_NOISE_PEAK_GAIN * gainScale, startTime + PERCUSSION_ATTACK_SECONDS);
         noiseGain.gain.exponentialRampToValueAtTime(MIN_AUDIBLE_GAIN, startTime + SNARE_NOISE_DECAY_SECONDS);
 
         noise.connect(highpass);
@@ -441,7 +565,8 @@ export default class Soundtrack {
         tone.frequency.value = SNARE_TONE_HZ;
 
         const toneGain = this.context.createGain();
-        toneGain.gain.setValueAtTime(SNARE_TONE_PEAK_GAIN * gainScale, startTime);
+        toneGain.gain.setValueAtTime(MIN_AUDIBLE_GAIN, startTime);
+        toneGain.gain.linearRampToValueAtTime(SNARE_TONE_PEAK_GAIN * gainScale, startTime + PERCUSSION_ATTACK_SECONDS);
         toneGain.gain.exponentialRampToValueAtTime(MIN_AUDIBLE_GAIN, startTime + SNARE_TONE_DECAY_SECONDS);
 
         tone.connect(toneGain);
@@ -469,7 +594,8 @@ export default class Soundtrack {
         osc.frequency.value = frequency;
 
         const gain = this.context.createGain();
-        gain.gain.setValueAtTime(CHARGE_TICK_PEAK_GAIN * CHARGE_TICK_VOLUME_SCALE, now);
+        gain.gain.setValueAtTime(MIN_AUDIBLE_GAIN, now);
+        gain.gain.linearRampToValueAtTime(CHARGE_TICK_PEAK_GAIN * CHARGE_TICK_VOLUME_SCALE, now + PERCUSSION_ATTACK_SECONDS);
         gain.gain.exponentialRampToValueAtTime(MIN_AUDIBLE_GAIN, now + CHARGE_TICK_DECAY_SECONDS);
 
         osc.connect(gain);
@@ -545,19 +671,18 @@ export default class Soundtrack {
         filter.connect(voiceGain);
         voiceGain.connect(this.masterGain);
 
-        // A shared slow vibrato feeds both sine layers below, so they waver
-        // together rather than drifting in and out of tune with each other.
-        const vibrato = this.context.createOscillator();
-        vibrato.type = 'sine';
-        vibrato.frequency.value = THROW_VIBRATO_RATE_HZ;
+        // this.vibrato (see constructor) is a single always-running LFO
+        // shared by every voice/throw - only this per-voice depth gain
+        // (scaled to *this* voice's own frequency) is created fresh here,
+        // so both sine layers below still waver together, in tune with
+        // each other, without spinning up a whole extra oscillator per
+        // throw just to duplicate an already-running one.
         const vibratoDepth = this.context.createGain();
         vibratoDepth.gain.value = frequency * THROW_VIBRATO_DEPTH_RATIO;
-        vibrato.connect(vibratoDepth);
-        vibrato.start(now);
-        vibrato.stop(fadeEndTime + 0.05);
+        this.vibrato.connect(vibratoDepth);
 
         const detuneRatio = 2 ** (THROW_DETUNE_CENTS / 1200);
-        for (const layerFrequency of [frequency, frequency * detuneRatio]) {
+        const layerOscillators = [frequency, frequency * detuneRatio].map((layerFrequency) => {
             const osc = this.context.createOscillator();
             osc.type = 'sine';
             osc.frequency.value = layerFrequency;
@@ -565,7 +690,21 @@ export default class Soundtrack {
             osc.connect(filter);
             osc.start(now);
             osc.stop(fadeEndTime + 0.05);
-        }
+            return osc;
+        });
+        // this.vibrato itself is never disconnected/stopped (it's shared,
+        // permanent - see constructor), but *this voice's own*
+        // vibratoDepth is a dead end once these oscillators actually stop:
+        // without this, this.vibrato would keep fanning out to every
+        // vibratoDepth node from every throw ever played, for the rest of
+        // the session, each one still costing real audio-thread work every
+        // render quantum despite having nothing left downstream to
+        // actually affect - a slow, ever-growing leak that (unlike the
+        // per-throw vibrato oscillator this replaced, which simply stopped
+        // and became collectible on its own) needs this explicit cleanup
+        // instead. Only one of the two layer oscillators' `onended` needs
+        // to fire this, since both stop at the same instant.
+        layerOscillators[0].onended = () => this.vibrato.disconnect(vibratoDepth);
     }
 
     /**

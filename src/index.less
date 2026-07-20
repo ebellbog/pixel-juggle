@@ -219,6 +219,19 @@ body.mode-game {
     &.open {
         z-index: 10;
     }
+
+    &::before {
+        content: 'Choose a pattern:';
+        display: block;
+        text-align: left;
+        margin-left: 3px;
+        margin-bottom: 4px;
+
+        font-family: 'Asimovian', monospace;
+        font-size: 13px;
+        letter-spacing: .2px;
+        opacity: .7;
+    }
 }
 
 #pattern-select-trigger {

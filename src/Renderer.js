@@ -17,6 +17,14 @@ const FLUID_MAX_OPACITY = 0.27;
 // game supports, so every step gets smoothed away, but still short next
 // to how many seconds/beats the whole fade-in/out actually spans.
 const INTENSITY_FOLLOW_TIME_CONSTANT = 0.4;
+// A separate, slower time constant used only while displayedIntensity is
+// easing *down* toward a lower target (a mistake resetting Soundtrack's
+// progression - see Game.recordThrowSequenceOutcome/resetProgression) -
+// rather than climbing toward a higher one. A mistake is meant to read as
+// a deliberate, noticeable "losing the reward," not just another equally
+// snappy step of the same fade-in, so it lingers longer on the way down
+// than it took to build up.
+const INTENSITY_FALLOFF_TIME_CONSTANT = 1.4;
 //
 // Soft, blurred, additively-blended color blobs drawn behind everything
 // else (see drawBokeh) - a screensaver-like "bokeh" field, one blob per
@@ -378,7 +386,10 @@ export default class Renderer {
             ? Math.min((intensityNow - this.lastIntensityTime) / 1000, BOKEH_MAX_DT)
             : 0;
         this.lastIntensityTime = intensityNow;
-        const intensityFollowRate = 1 - Math.exp(-intensityDt / INTENSITY_FOLLOW_TIME_CONSTANT);
+        const intensityTimeConstant = rawIntensity < this.displayedIntensity
+            ? INTENSITY_FALLOFF_TIME_CONSTANT
+            : INTENSITY_FOLLOW_TIME_CONSTANT;
+        const intensityFollowRate = 1 - Math.exp(-intensityDt / intensityTimeConstant);
         this.displayedIntensity += (rawIntensity - this.displayedIntensity) * intensityFollowRate;
 
         // Drawn immediately after the flat background fill, before

@@ -57,7 +57,7 @@ const SPLAT_RADIUS = 0.0022;
 // VELOCITY_DISSIPATION is the other lever on "how far it travels before
 // stopping" - unlike this, it calms *existing* motion down faster rather
 // than injecting less of it to begin with.
-const SPLAT_FORCE_SCALE = 0.35;
+const SPLAT_FORCE_SCALE = 0.3;
 // A ball moving at (or above) this many screen px/sec, smoothed, splats at
 // full strength; slower balls splat proportionally less, and a
 // resting/held ball (smoothed speed ~0) stops adding anything at all.

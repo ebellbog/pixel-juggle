@@ -14,6 +14,20 @@
 
 @border-radius-small: 4px;
 
+@screen-fade-duration: 0.55s; // Keep in sync with SCREEN_FADE_MS in App.js.
+@screen-fade-easing: ease;
+
+.screen-layer-transition() {
+    transition: opacity @screen-fade-duration @screen-fade-easing,
+        visibility @screen-fade-duration @screen-fade-easing;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .screen-layer-transition() {
+        transition: none;
+    }
+}
+
 // Uppercase HUD labels (stat labels in #game-stats, "LEFT HAND" / "RIGHT
 // HAND" above the throw-height wedges in Renderer.drawThrowHeightWedge) -
 // keep canvas values there in sync with this mixin.
@@ -39,8 +53,11 @@
 .action-button-style(@color, @darken-amount: 18%) {
     @shade: darken(@color, @darken-amount);
     background-color: @color;
-    border: 2px solid @shade;
-    box-shadow: 2px 2px 0 @shade;
+
+    &:not(:disabled) {
+        border: 2px solid @shade;
+        box-shadow: 2px 2px 0 @shade;
+    }
 }
 
 html,
@@ -87,60 +104,91 @@ body {
         'opsz' 24;
 }
 
-// Which of the three screens (menu / demo / game) is showing is driven
-// entirely by one body class (see App.setMode) - everything below just
-// reacts to it, so there's a single source of truth for "what's visible
-// right now" rather than each element tracking its own show/hide flag.
+// Which screen (menu vs juggling) is showing is driven by one body class
+// (see App.setMode). Opacity/visibility crossfade rather than display
+// toggling so entering/leaving demo or game can animate smoothly.
 #title-screen {
-    display: none;
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100%;
+    padding-top: 8vh;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    .screen-layer-transition();
 }
 
-#canvas-area,
+#canvas-area {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    .screen-layer-transition();
+}
+
 #game-controls,
 #settings-button {
-    display: none;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    .screen-layer-transition();
+}
+
+#game-stats {
+    opacity: 0;
+    visibility: hidden;
+    .screen-layer-transition();
 }
 
 body.mode-menu {
     #title-screen {
-        display: flex;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 
     #settings-button {
-        display: block;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 }
 
 body.mode-demo,
 body.mode-game {
     #canvas-area {
-        display: block;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 
     #game-controls {
-        display: flex;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 
     #settings-button {
-        display: block;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 }
 
 body.mode-game {
     #game-stats {
-        display: grid;
+        opacity: 1;
+        visibility: visible;
     }
 }
 
 // --- Title screen (menu) ----------------------------------------------
-
-#title-screen {
-    position: relative;
-    flex-direction: column;
-    align-items: center;
-    height: 100%;
-    padding-top: 8vh;
-}
 
 #game-title {
     // Major Mono Display is the active pick - Londrina Sketch and Plaster
@@ -231,7 +279,7 @@ body.mode-game {
         z-index: 1;
     }
 
-    > :not(.pattern-picker-disc):not(.menu-orb) {
+    > :not(.pattern-picker-disc):not(.menu-orb):not(#pattern-select-wrap) {
         position: relative;
         z-index: 2;
     }
@@ -353,7 +401,7 @@ body.mode-game {
     border: 1px solid white;//#3a3a52;
     border-top: none;
     border-radius: 0 0 @border-radius-small @border-radius-small;
-    background-color: fade(#0e0e18, 75%);
+    background-color: fade(#0e0e18, 60%);
     backdrop-filter: blur(10px);
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     max-height: 280px;
@@ -428,7 +476,7 @@ body.mode-game {
     transform: translateY(-50%);
     font-size: 18px;
     line-height: 1;
-    cursor: help;
+    cursor: default;
     pointer-events: auto;
 
     &.valid {
@@ -478,6 +526,7 @@ body.mode-game {
         opacity: 0.4;
         cursor: not-allowed;
         box-shadow: none;
+        border: 2px solid @bg;
     }
 
     &[data-action="show-me"] {
@@ -500,7 +549,6 @@ body.mode-game {
 // --- Demo/game chrome ---------------------------------------------------
 
 #canvas-area {
-    position: relative;
     width: 100%;
     height: 100%;
 }
@@ -597,7 +645,7 @@ body.mode-game {
 // exact horizontal center of the page, with each stat the same distance out
 // from it regardless of how wide its label/value pair grows.
 #game-stats {
-    display: none;
+    display: grid;
     position: absolute;
     top: 22px;
     left: 0;
@@ -663,6 +711,7 @@ body.mode-game {
 // Outlined at a light weight (see .material-symbols-outlined above) gives
 // the large, thin look the old Font Awesome setup was approximating.
 #game-controls {
+    display: flex;
     position: absolute;
     top: 14px;
     right: 22px;

@@ -10,6 +10,12 @@ import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern
 
 const DEFAULT_BPM = 60;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
+// Keep in sync with @screen-fade-duration in index.less.
+const SCREEN_FADE_MS = 550;
+
+function waitMs(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Owns the page's three screens - the title/menu screen (siteswap picker,
@@ -337,10 +343,18 @@ export default class App {
 
     /** Swaps between the menu/demo/game screens - see index.less for what each body class actually shows/hides. */
     setMode(mode) {
+        const leavingMenu = this.mode === 'menu' && mode !== 'menu';
         this.mode = mode;
         this.$body.attr('class', `mode-${mode}`);
-        if (mode === 'menu') this.menuOrbAnimation.start();
-        else this.menuOrbAnimation.stop();
+        if (mode === 'menu') {
+            this.menuOrbAnimation.start();
+        } else if (leavingMenu) {
+            // Keep orbs moving through the title-screen fade rather than
+            // snapping to their t = 0 pose the instant the mode flips.
+            this.menuOrbAnimation.stopAfter(SCREEN_FADE_MS);
+        } else {
+            this.menuOrbAnimation.stop();
+        }
     }
 
     setBpm(bpm) {
@@ -444,9 +458,8 @@ export default class App {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.stop();
 
-        // #canvas-area is hidden (display: none) on the menu screen, so it
-        // has to actually become visible - via setMode - before resize()
-        // measures it, or it'd just measure a zero-size box.
+        // #canvas-area is opacity-hidden on the menu screen, so setMode has
+        // to run before resize() measures it, or it'd measure a zero-size box.
         this.setMode('demo');
         this.renderer.resize();
         this.renderer.resetIntensity();
@@ -461,10 +474,12 @@ export default class App {
         // before building the simulator/starting the tick loop is what
         // keeps that first beat from ever being scheduled against a still-
         // suspended context - which otherwise gets silently dropped once
-        // the context does wake up, misread as a warm-up hiccup.
+        // the context does wake up, misread as a warm-up hiccup. Also wait
+        // out the menu→demo crossfade (see SCREEN_FADE_MS / index.less) so
+        // juggling doesn't start underneath a still-fading title screen.
         const startToken = ++this.startToken;
-        this.soundtrack.resume().then(() => {
-            if (startToken !== this.startToken) return; // Superseded by a newer start/stop before resume() settled.
+        Promise.all([this.soundtrack.resume(), waitMs(SCREEN_FADE_MS)]).then(() => {
+            if (startToken !== this.startToken) return; // Superseded by a newer start/stop before we settled.
 
             this.simulator = new JugglingSimulator(this.siteswap, {
                 bpm: this.bpm,

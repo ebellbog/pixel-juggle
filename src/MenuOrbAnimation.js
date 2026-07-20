@@ -66,8 +66,8 @@ export const MENU_ORB_START_POSITIONS = getMenuOrbPositionsAt(0);
 
 /**
  * Positions every .menu-orb under #pattern-picker each frame while the menu
- * is showing (see App.setMode). Stops when the player leaves the title
- * screen so the loop isn't running under demo/game.
+ * is showing (see App.setMode). Elapsed time carries over across stop/start
+ * so re-entering the menu never snaps back to t = 0 mid-path.
  */
 export default class MenuOrbAnimation {
     constructor(element, config = MENU_ORB_LINKAGE) {
@@ -76,27 +76,52 @@ export default class MenuOrbAnimation {
         this.orbElements = element.querySelectorAll('.menu-orb');
         this.rafId = null;
         this.startTime = null;
+        this.elapsedOffset = 0;
+        this.stopDelayId = null;
         this.reducedMotion = typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         this.apply(0);
     }
 
     start() {
-        this.apply(0);
+        this.cancelStopAfter();
         if (this.reducedMotion) return;
         if (this.rafId != null) return;
         this.startTime = performance.now();
         const tick = (now) => {
-            this.apply((now - this.startTime) / 1000);
+            const t = this.elapsedOffset + (now - this.startTime) / 1000;
+            this.apply(t);
             this.rafId = requestAnimationFrame(tick);
         };
         this.rafId = requestAnimationFrame(tick);
     }
 
+    /** Freeze the loop but keep the last applied orb positions on screen. */
     stop() {
+        this.cancelStopAfter();
         if (this.rafId != null) {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;
+        }
+        if (this.startTime != null) {
+            this.elapsedOffset += (performance.now() - this.startTime) / 1000;
+            this.startTime = null;
+        }
+    }
+
+    /** Like stop(), but keeps animating for `delayMs` first (see App.setMode). */
+    stopAfter(delayMs) {
+        this.cancelStopAfter();
+        this.stopDelayId = setTimeout(() => {
+            this.stopDelayId = null;
+            this.stop();
+        }, delayMs);
+    }
+
+    cancelStopAfter() {
+        if (this.stopDelayId != null) {
+            clearTimeout(this.stopDelayId);
+            this.stopDelayId = null;
         }
     }
 

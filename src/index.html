@@ -15,6 +15,7 @@
              demo or game is running (see body.mode-demo/mode-game in index.less). -->
         <div id="title-screen">
             <h1 id="game-title">PiXel JuGGle</h1>
+            <div id="menu-center">
             <div id="pattern-picker">
                 <div class="menu-orb menu-orb--stripes-a" aria-hidden="true"></div>
                 <div class="menu-orb menu-orb--stripes-b" aria-hidden="true"></div>
@@ -37,9 +38,6 @@
                 </div>
                 <div id="menu-spacer"></div>
                 <div id="menu-buttons">
-                    <button type="button" class="action-button" data-action="tutorial" disabled>
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
-                    </button>
                     <button type="button" class="action-button" data-action="show-me" disabled>
                         <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
                     </button>
@@ -49,10 +47,16 @@
                     <button type="button" class="action-button" data-action="compete" disabled>
                         <span class="material-symbols-outlined button-icon" aria-hidden="true">emoji_events</span> Compete
                     </button>
-                    <button type="button" class="action-button" data-action="leaderboard">
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">leaderboard</span> Scores
-                    </button>
                 </div>
+            </div>
+            </div>
+            <div id="menu-secondary-buttons">
+                <button type="button" class="outline-button" data-action="tutorial" disabled>
+                    <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
+                </button>
+                <button type="button" class="outline-button" data-action="leaderboard">
+                    <span class="material-symbols-outlined button-icon" aria-hidden="true">leaderboard</span> High scores
+                </button>
             </div>
             <div id="title-credits">
                 <div>Designed by Elana Bell Bogdan, 2026</div>

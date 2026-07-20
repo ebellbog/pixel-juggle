@@ -31,11 +31,13 @@ export default class App {
         this.$body = $(document.body);
         this.$patternSelectWrap = $('#pattern-select-wrap');
         this.$patternPicker = document.getElementById('pattern-picker');
+        this.$titleScreen = $('#title-screen');
         this.$patternSelectTrigger = $('#pattern-select-trigger');
         this.$patternSelectList = $('#pattern-select-list');
         this.$customInputWrap = $('#custom-input-wrap');
         this.$input = $('#siteswap-input');
         this.$menuButtons = $('#menu-buttons');
+        this.$menuSecondaryButtons = $('#menu-secondary-buttons');
         this.$menuSpacer = $('#menu-spacer');
         this.$stopButton = $('#stop-button');
         this.$restartButton = $('#restart-button');
@@ -171,13 +173,13 @@ export default class App {
         if (value === CUSTOM_PATTERN_VALUE) {
             this.renderPatternTrigger('Custom\u2026');
             this.$customInputWrap.removeClass('hidden');
-            this.$menuSpacer.addClass('hidden');
+            // this.$menuSpacer.addClass('hidden');
             this.$input.trigger('focus');
         } else {
             const pattern = findPattern(value);
             this.renderPatternTrigger(pattern.name);
             this.$customInputWrap.addClass('hidden');
-            this.$menuSpacer.removeClass('hidden');
+            // this.$menuSpacer.removeClass('hidden');
             this.$input.val(value);
             this.$patternSelectList
                 .find('.pattern-select-option')
@@ -216,7 +218,7 @@ export default class App {
                 this.startDemo();
             }
         });
-        $(this.$patternPicker).on('click', '.action-button[data-action]', (event) => {
+        this.$titleScreen.on('click', '[data-action]', (event) => {
             const $button = $(event.currentTarget);
             if ($button.prop('disabled')) return;
             this.handleMenuAction($button.attr('data-action'));
@@ -440,8 +442,10 @@ export default class App {
 
         if (this.siteswap.isValid) {
             this.$menuButtons.find('[data-action]').prop('disabled', false);
+            this.$menuSecondaryButtons.find('[data-action="tutorial"]').prop('disabled', false);
         } else {
             this.$menuButtons.find('[data-action]').prop('disabled', true);
+            this.$menuSecondaryButtons.find('[data-action="tutorial"]').prop('disabled', true);
         }
 
         this.updateValidationIcon(isCustom, raw);

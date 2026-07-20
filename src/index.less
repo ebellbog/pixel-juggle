@@ -207,17 +207,22 @@ body.mode-game {
     color: @text;
     text-shadow: 0 0 18px fade(@accent, 65%), 0 0 40px fade(@accent, 35%);
     text-align: center;
-    z-index: 1;
+    z-index: 2;
 }
 
 // Centered on the title screen. Three decorative orbs (.menu-orb) follow a
 // two-link hinged path driven by MenuOrbAnimation.js. The purple disc sits
 // between the orbs and the controls via .pattern-picker-disc.
-#pattern-picker {
+#menu-center {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
+    z-index: 1;
+}
+
+#pattern-picker {
+    position: relative;
     width: 380px;
     height: 380px;
     display: flex;
@@ -495,13 +500,41 @@ body.mode-game {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 10px;
+    row-gap: 12px;
     width: 100%;
     margin-bottom: -45px;
 
-    .action-button[data-action="leaderboard"] {
+    .action-button[data-action="compete"] {
         grid-column: 1 / -1;
         justify-self: center;
         width: 50%;
+    }
+}
+
+#menu-secondary-buttons {
+    position: absolute;
+    bottom: 50%;
+    left: 50%;
+    transform: translate(-50%, 330px);
+    display: flex;
+    gap: 30px;
+    width: 380px;
+    max-width: calc(100vw - 48px);
+    box-sizing: border-box;
+    z-index: 1;
+
+    .outline-button {
+        flex: 1;
+        font-size: 16px;
+        padding: 8px 12px;
+        border-style: double;
+        border-width: 4px;
+
+        .button-icon {
+            font-size: 18px;
+            vertical-align: -4px;
+            margin-right: 2px;
+        }
     }
 }
 
@@ -557,24 +590,15 @@ body.mode-game {
     }
 
     &[data-action="show-me"] {
-        .action-button-style(@orb-top);
+        .action-button-style(darken(@orb-picker, 20%));
     }
 
     &[data-action="try"] {
         .action-button-style(@orb-bottom);
     }
 
-    &[data-action="tutorial"] {
-        .action-button-style(darken(@orb-picker, 20%));
-    }
-
     &[data-action="compete"] {
-        .action-button-style(@invalid);
-    }
-
-    &[data-action="leaderboard"] {
-        .action-button-style(@orb-lime);
-        // color: @bg;
+        .action-button-style(@orb-top);
     }
 }
 
@@ -798,12 +822,12 @@ body.mode-game {
 
 .app-modal {
     position: relative;
-    width: 400px;
+    width: 420px;
     max-width: calc(100vw - 48px);
     max-height: calc(100vh - 48px);
     overflow-y: auto;
     box-sizing: border-box;
-    padding: 32px 28px 28px;
+    padding: 32px 30px 28px;
     background-color: @bg;
     border: 1px solid white;
     border-radius: @border-radius-small;
@@ -919,19 +943,23 @@ body.mode-game {
     letter-spacing: 0.3px;
     padding: 5px 14px;
     border-radius: 50px;
-    background: transparent;
-    border: 1px solid fade(@text, 30%);
-    color: fade(@text, 50%);
+    background: @bg;
+    border: 1px solid fade(@text, 40%);
+    color: fade(@text, 80%);
     cursor: pointer;
     transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 
-    &:hover {
-        color: fade(@text, 80%);
-        border-color: fade(@text, 55%);
-        background: fade(@text, 6%);
+    &:hover:not(:disabled) {
+        color: @bg;
+        background: @text;
     }
 
-    &:active {
+    &:active:not(:disabled) {
         transform: translateY(1px);
+    }
+
+    &:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
     }
 }

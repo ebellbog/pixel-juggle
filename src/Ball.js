@@ -45,5 +45,12 @@ export default class Ball {
         // this on the ball itself since a hand's queue can hold several
         // balls at differing rest states at once).
         this.restVelocity = { x: 0, y: 0 };
+        // Flips true the first time this ball is actually thrown (see
+        // Game.executeThrow). Distinguishes a ball genuinely resting
+        // un-thrown after a real catch from one that's simply never had its
+        // first turn yet - e.g. still sitting in Game.buildInitialQueues'
+        // bulk starting deal - which Game.resolveLandings needs to tell
+        // apart from a real missed throw (see there).
+        this.everThrown = false;
     }
 }

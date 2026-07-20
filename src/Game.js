@@ -28,10 +28,11 @@ const BEAT_FLASH_MS = 180;
  * this is," so starting a beat late or making one mistake doesn't just
  * permanently desync the cue from what the player is actually doing. Any
  * wrong throw, an attempt that fails outright (empty hand,
- * expired hold), or a catch landing on a hand that's still holding an
- * unthrown ball (see resolveLandings - these patterns are never
- * multiplexed, so that always means some earlier throw got skipped) hides
- * the highlight until a full clean period brings it back - simply not
+ * expired hold), or a catch landing on a hand that's still holding a ball
+ * it's already thrown at least once before (see resolveLandings - these
+ * patterns are never multiplexed, so that always means some earlier throw
+ * got skipped) hides the highlight until a full clean period brings it
+ * back - simply not
  * pressing anything is never itself held against the player, since there's
  * no fixed per-beat obligation here (see resolveBeatThrow). Before the
  * player's first-ever match nothing is held against them yet either way
@@ -631,6 +632,7 @@ export default class Game {
 
         const hadQueueBehind = queue.length > 1;
         const ball = queue.shift();
+        ball.everThrown = true;
         if (hadQueueBehind) {
             this.queueShiftStart[hand] = this.time;
             this.queueShiftUntil[hand] = this.time + this.physics.carryDuration;
@@ -700,23 +702,33 @@ export default class Game {
      *
      * Also doubles as the game's only "missed throw" detector: since none
      * of these patterns are multiplexed, a hand should never be holding
-     * more than one ball at a time once real play is underway - if a catch
-     * lands on top of a ball that's already sitting there, that resting
+     * more than one *already-circulated* ball at a time once real play is
+     * underway - if a catch lands on top of one of those, that resting
      * ball's throw never happened, which breaks the sequence streak exactly
-     * like a wrong throw would (see recordThrowSequenceOutcome). Gated on
-     * throwSequenceStarted so it doesn't fire from the initial multi-ball
-     * deal (see buildInitialQueues) or from fumbling before the player's
-     * first-ever correct throw - both already exempt from mismatches.
+     * like a wrong throw would (see recordThrowSequenceOutcome).
+     *
+     * Deliberately checks each resting ball's own everThrown flag rather
+     * than just the queue's length: buildInitialQueues can bulk-deal
+     * several balls into the same hand's queue up front (e.g. a pattern
+     * needing 3 balls in one hand), and those are still waiting on their
+     * own first turn, not backlogged - so a real catch landing on top of
+     * one of them (which can happen on the very same beat that ball is
+     * about to be thrown, once its natural turn comes up) must not count
+     * as a miss. Once a ball has actually been thrown at least once,
+     * though, finding it still sitting there when another lands is a
+     * genuine miss. Gated on throwSequenceStarted so fumbling before the
+     * player's first-ever correct throw is already exempt from mismatches.
      */
     resolveLandings(uptoTime = this.time) {
         for (let i = this.inFlight.length - 1; i >= 0; i--) {
             const entry = this.inFlight[i];
             if (entry.flight.endTime <= uptoTime + LANDING_EPSILON) {
-                if (this.throwSequenceStarted && this.queues[entry.destHand].length > 0) {
+                const queue = this.queues[entry.destHand];
+                if (this.throwSequenceStarted && queue.some((waiting) => waiting.everThrown)) {
                     this.recordThrowSequenceOutcome(null, null, null);
                 }
                 entry.ball.restVelocity = entry.flight.landVelocity;
-                this.queues[entry.destHand].push(entry.ball);
+                queue.push(entry.ball);
                 this.inFlight.splice(i, 1);
             }
         }

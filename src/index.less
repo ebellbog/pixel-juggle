@@ -159,11 +159,9 @@ body.mode-game {
     z-index: 1;
 }
 
-// Centered on the title screen. Each decorative orb is its own 340px
-// circle (::before top, ::after bottom); positions follow a two-link
-// hinged path driven by MenuOrbAnimation.js (--orb-* variables below).
-// The purple disc sits between the orbs and the controls via
-// .pattern-picker-disc (only two pseudos available).
+// Centered on the title screen. Three decorative orbs (.menu-orb) follow a
+// two-link hinged path driven by MenuOrbAnimation.js. The purple disc sits
+// between the orbs and the controls via .pattern-picker-disc.
 #pattern-picker {
     position: absolute;
     top: 50%;
@@ -180,23 +178,22 @@ body.mode-game {
     box-sizing: border-box;
     text-align: center;
 
-    &::before,
-    &::after {
-        content: '';
+    .menu-orb {
         position: absolute;
         top: 50%;
         left: 50%;
         width: 320px;
         height: 320px;
-        transform: translate(calc(-50% + var(--orb-top-x, 0px)), calc(-50% + var(--orb-top-y, -120px)));
         border-radius: 50%;
         border: 1px solid white;
         pointer-events: none;
         z-index: 0;
+        // Rest pose at t = 0 (see MENU_ORB_START_POSITIONS in MenuOrbAnimation.js).
+        transform: translate(-50%, -50%);
     }
 
-    &::before {
-        // Screen-fixed stripe angle — orbs only translate, never rotate.
+    .menu-orb--stripes-a {
+        transform: translate(calc(-50% + 0px), calc(-50% + -120px));
         background: repeating-linear-gradient(
             -10deg,
             #fff,
@@ -206,8 +203,8 @@ body.mode-game {
         );
     }
 
-    &::after {
-        transform: translate(calc(-50% + var(--orb-bottom-x, 0px)), calc(-50% + var(--orb-bottom-y, 120px)));
+    .menu-orb--stripes-b {
+        transform: translate(calc(-50% + 103.92px), calc(-50% + 60px));
         background: repeating-linear-gradient(
             80deg,
             #fff,
@@ -215,6 +212,13 @@ body.mode-game {
             @bg .75px,
             @bg 12px
         );
+    }
+
+    .menu-orb--dots {
+        transform: translate(calc(-50% + -103.92px), calc(-50% + 60px));
+        background-color: @bg;
+        background-image: radial-gradient(circle, #fff 1.25px, transparent 1.25px);
+        background-size: 14px 14px;
     }
 
     .pattern-picker-disc {
@@ -227,7 +231,7 @@ body.mode-game {
         z-index: 1;
     }
 
-    > :not(.pattern-picker-disc) {
+    > :not(.pattern-picker-disc):not(.menu-orb) {
         position: relative;
         z-index: 2;
     }

@@ -16,9 +16,10 @@
         <div id="title-screen">
             <h1 id="game-title">PiXel JuGGle</h1>
             <div id="pattern-picker">
-                <!-- Purple disc between the ::before/::after orbs and the
-                     controls - only two pseudos available, so the face gets
-                     its own element rather than sharing ::after. -->
+                <div class="menu-orb menu-orb--stripes-a" aria-hidden="true"></div>
+                <div class="menu-orb menu-orb--stripes-b" aria-hidden="true"></div>
+                <div class="menu-orb menu-orb--dots" aria-hidden="true"></div>
+                <!-- Purple disc between the orbs and the controls. -->
                 <div class="pattern-picker-disc" aria-hidden="true"></div>
                 <div id="pattern-select-wrap">
                     <button type="button" id="pattern-select-trigger" aria-haspopup="listbox" aria-expanded="false">

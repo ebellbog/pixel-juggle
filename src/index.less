@@ -9,6 +9,7 @@
 @orb-top: #f58231;
 @orb-bottom: #911eb4;
 @orb-picker: #42f4f1;
+@orb-lime: #6eac30; // Ball palette lime — leaderboard button.
 
 @accent: desaturate(@orb-picker, 65%);
 
@@ -56,6 +57,8 @@
 
     &:not(:disabled) {
         border: 2px solid @shade;
+    }
+    &:not(:disabled, :hover) {
         box-shadow: 2px 2px 0 @shade;
     }
 }
@@ -114,7 +117,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    height: 100%;
+    box-sizing: border-box;
     padding-top: 8vh;
     opacity: 0;
     visibility: hidden;
@@ -493,6 +496,30 @@ body.mode-game {
     grid-template-columns: 1fr 1fr;
     gap: 10px;
     width: 100%;
+    margin-bottom: -45px;
+
+    .action-button[data-action="leaderboard"] {
+        grid-column: 1 / -1;
+        justify-self: center;
+        width: 50%;
+    }
+}
+
+#title-credits {
+    margin-top: auto;
+    width: 100%;
+    padding-bottom: 16px;
+    text-align: center;
+    font-family: 'Turret Road', sans-serif;
+    font-size: 15px;
+    letter-spacing: 0.2px;
+    color: fade(@text, 38%);
+    pointer-events: auto;
+    flex-shrink: 0;
+
+    div {
+        margin-bottom: 4px;
+    }
 }
 
 .action-button {
@@ -500,7 +527,7 @@ body.mode-game {
     font-size: 16px;
     font-weight: bold;
     letter-spacing: .5px;
-    padding: 6px 12px 6px 6px;
+    padding: 5px 12px 5px 6px;
     border-radius: 50px;
     color: white;
     cursor: pointer;
@@ -543,6 +570,11 @@ body.mode-game {
 
     &[data-action="compete"] {
         .action-button-style(@invalid);
+    }
+
+    &[data-action="leaderboard"] {
+        .action-button-style(@orb-lime);
+        // color: @bg;
     }
 }
 
@@ -748,9 +780,9 @@ body.mode-game {
     color: @orb-top;
 }
 
-// --- Settings modal ------------------------------------------------------
+// --- Modals (settings, credits, …) ------------------------------------
 
-#settings-overlay {
+.app-modal-overlay {
     display: none;
     position: fixed;
     inset: 0;
@@ -764,7 +796,7 @@ body.mode-game {
     }
 }
 
-#settings-modal {
+.app-modal {
     position: relative;
     width: 400px;
     max-width: calc(100vw - 48px);
@@ -777,7 +809,7 @@ body.mode-game {
     border-radius: @border-radius-small;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 
-    #settings-close-button {
+    .app-modal-close {
         position: absolute;
         top: 8px;
         right: 8px;
@@ -788,7 +820,7 @@ body.mode-game {
     }
 }
 
-#settings-title {
+.app-modal-title {
     margin: 0 0 24px;
     font-family: 'Turret Road', sans-serif;
     font-size: 20px;
@@ -796,6 +828,29 @@ body.mode-game {
     letter-spacing: .5px;
     text-align: center;
 }
+
+.credits-body {
+    font-family: 'Asimovian', monospace;
+    font-size: 14px;
+    line-height: 1.55;
+    letter-spacing: 0.2px;
+    color: fade(@text, 80%);
+
+    p {
+        margin: 0 0 14px;
+
+        &:last-child {
+            margin-bottom: 0;
+        }
+    }
+
+    strong {
+        font-weight: bold;
+        color: @text;
+    }
+}
+
+// --- Settings modal (extends .app-modal-* above) -----------------------
 
 .settings-group {
     margin-bottom: 22px;
@@ -848,12 +903,35 @@ body.mode-game {
     letter-spacing: .3px;
     background: none;
     border: none;
-    color: fade(@text, 60%);
+    color: fade(@text, 45%);
     cursor: pointer;
     text-decoration: underline;
     transition: color 0.15s ease;
 
     &:hover {
         color: @text;
+    }
+}
+
+.outline-button {
+    font-family: 'Asimovian', monospace;
+    font-size: 12px;
+    letter-spacing: 0.3px;
+    padding: 5px 14px;
+    border-radius: 50px;
+    background: transparent;
+    border: 1px solid fade(@text, 30%);
+    color: fade(@text, 50%);
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+
+    &:hover {
+        color: fade(@text, 80%);
+        border-color: fade(@text, 55%);
+        background: fade(@text, 6%);
+    }
+
+    &:active {
+        transform: translateY(1px);
     }
 }

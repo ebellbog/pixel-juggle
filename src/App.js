@@ -44,6 +44,9 @@ export default class App {
         this.$settingsOverlay = $('#settings-overlay');
         this.$settingsCloseButton = $('#settings-close-button');
         this.$settingsResetButton = $('#settings-reset-button');
+        this.$creditsOverlay = $('#credits-overlay');
+        this.$creditsCloseButton = $('#credits-close-button');
+        this.$creditsLink = $('#credits-link');
         this.$streakValue = $('#streak-value');
         this.$maxStreakValue = $('#max-streak-value');
         this.$validationIcon = $('#validation-icon');
@@ -213,7 +216,7 @@ export default class App {
                 this.startDemo();
             }
         });
-        this.$menuButtons.on('click', '[data-action]', (event) => {
+        $(this.$patternPicker).on('click', '.action-button[data-action]', (event) => {
             const $button = $(event.currentTarget);
             if ($button.prop('disabled')) return;
             this.handleMenuAction($button.attr('data-action'));
@@ -227,6 +230,7 @@ export default class App {
         this.$bpmSlider.on('input', () => this.setBpm(Number(this.$bpmSlider.val())));
         $(window).on('resize', () => this.handleResize());
         this.bindSettingsEvents();
+        this.bindCreditsEvents();
         // 'R' restarts an active demo/game from the keyboard, same as the
         // button (see restart()) - only while one is actually running, and
         // only when the siteswap input isn't focused, so it doesn't hijack
@@ -255,7 +259,9 @@ export default class App {
             if (event.target === this.$settingsOverlay[0]) this.closeSettings();
         });
         $(window).on('keydown', (event) => {
-            if (event.key === 'Escape' && !this.$settingsOverlay.hasClass('hidden')) this.closeSettings();
+            if (event.key !== 'Escape') return;
+            if (!this.$creditsOverlay.hasClass('hidden')) this.closeCredits();
+            else if (!this.$settingsOverlay.hasClass('hidden')) this.closeSettings();
         });
 
         this.$settingsOverlay.find('.settings-option-row').on('click', '.settings-option', (event) => {
@@ -280,12 +286,28 @@ export default class App {
         });
     }
 
+    bindCreditsEvents() {
+        this.$creditsLink.on('click', () => this.openCredits());
+        this.$creditsCloseButton.on('click', () => this.closeCredits());
+        this.$creditsOverlay.on('click', (event) => {
+            if (event.target === this.$creditsOverlay[0]) this.closeCredits();
+        });
+    }
+
     openSettings() {
         this.$settingsOverlay.removeClass('hidden');
     }
 
     closeSettings() {
         this.$settingsOverlay.addClass('hidden');
+    }
+
+    openCredits() {
+        this.$creditsOverlay.removeClass('hidden');
+    }
+
+    closeCredits() {
+        this.$creditsOverlay.addClass('hidden');
     }
 
     /**
@@ -397,6 +419,9 @@ export default class App {
                 break;
             case 'compete':
                 // TODO: competitive/challenge mode.
+                break;
+            case 'leaderboard':
+                // TODO: leaderboard screen.
                 break;
             default:
                 break;

@@ -49,7 +49,14 @@
                     <button type="button" class="action-button" data-action="compete" disabled>
                         <span class="material-symbols-outlined button-icon" aria-hidden="true">emoji_events</span> Compete
                     </button>
+                    <button type="button" class="action-button" data-action="leaderboard">
+                        <span class="material-symbols-outlined button-icon" aria-hidden="true">leaderboard</span> Scores
+                    </button>
                 </div>
+            </div>
+            <div id="title-credits">
+                <div>Designed by Elana Bell Bogdan, 2026</div>
+                <button type="button" id="credits-link" class="text-button">See full credits</button>
             </div>
         </div>
         <div id="canvas-area">
@@ -99,12 +106,12 @@
 
         <!-- Settings modal - toggled by #settings-button, visible in every
              mode (see App.openSettings/closeSettings). -->
-        <div id="settings-overlay" class="hidden">
-            <div id="settings-modal">
-                <button id="settings-close-button" class="icon-button" title="Close">
+        <div id="settings-overlay" class="app-modal-overlay hidden">
+            <div id="settings-modal" class="app-modal">
+                <button id="settings-close-button" class="icon-button app-modal-close" title="Close">
                     <span class="material-symbols-outlined" aria-hidden="true">close</span>
                 </button>
-                <h2 id="settings-title">Settings</h2>
+                <h2 id="settings-title" class="app-modal-title">Settings</h2>
 
                 <div class="settings-group">
                     <div class="settings-group-label">Height control</div>
@@ -133,6 +140,21 @@
                 </div>
 
                 <button id="settings-reset-button" class="text-button">Reset to defaults</button>
+            </div>
+        </div>
+
+        <!-- Credits modal - same chrome as #settings-overlay (see index.less). -->
+        <div id="credits-overlay" class="app-modal-overlay hidden">
+            <div id="credits-modal" class="app-modal">
+                <button id="credits-close-button" class="icon-button app-modal-close" title="Close">
+                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
+                </button>
+                <h2 class="app-modal-title">Credits</h2>
+                <div class="credits-body">
+                    <p><strong>Pixel Juggle</strong></p>
+                    <p>Designed and developed by Elana Bell Bogdan, 2026.</p>
+                    <p>Placeholder — full credits coming soon.</p>
+                </div>
             </div>
         </div>
     </div>

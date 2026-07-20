@@ -94,6 +94,19 @@ void main () {
 // stored alpha directly here would make even barely-tinted pixels fully
 // opaque, painting over Renderer's true background with solid black
 // wherever the sim has "touched" a pixel but not yet colored it.
+//
+// Repeated overlapping splats (SPLAT_SHADER just keeps adding color, with
+// no cap - see there) can push the *stored* dye well past 1.0 in every
+// channel at once, wherever density peaks (a ball's own trail crossing
+// itself, or several balls' trails overlapping). The canvas this blits
+// onto is a normal 8-bit target, so any channel over 1.0 gets clamped
+// independently right there on write - and once every channel has been
+// pushed past 1.0, independent clamping drives all three to exactly 1.0,
+// i.e. flat white, however saturated the dye's own color actually was.
+// Dividing by the brightest channel instead (only when it's over 1) scales
+// all three down together, preserving their ratio - so a dye that's
+// "overexposed" still comes out as a fully saturated, maximally bright
+// version of its own hue instead of washing out toward white.
 const COPY_SHADER = `#version 300 es
 precision highp float;
 precision highp sampler2D;
@@ -101,8 +114,10 @@ in vec2 vUv;
 uniform sampler2D uTexture;
 out vec4 fragColor;
 void main () {
-    vec3 color = texture(uTexture, vUv).rgb;
-    float alpha = clamp(max(color.r, max(color.g, color.b)), 0.0, 1.0);
+    vec3 raw = texture(uTexture, vUv).rgb;
+    float peak = max(raw.r, max(raw.g, raw.b));
+    vec3 color = peak > 1.0 ? raw / (peak * .8) : raw;
+    float alpha = clamp(peak, 0.0, 1.0);
     fragColor = vec4(color, alpha);
 }
 `;

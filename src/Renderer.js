@@ -652,8 +652,9 @@ export default class Renderer {
             }
         }
 
-        ctx.font = '700 16px "Turret Road", sans-serif';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        // Keep in sync with .ui-label-style() in index.less.
+        ctx.font = '400 15px "Turret Road", sans-serif';
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.fillText(

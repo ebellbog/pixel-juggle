@@ -85,10 +85,12 @@ const BEAT_FLASH_MS = 180;
  * lives there.
  */
 export default class Game {
-    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap, soundtrack }) {
+    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap, $streakValue, $maxStreakValue, soundtrack }) {
         this.renderer = renderer;
         this.$beatBar = $beatBar;
         this.$beatBarWrap = $beatBarWrap;
+        this.$streakValue = $streakValue;
+        this.$maxStreakValue = $maxStreakValue;
         // A percussive tick per beat and a fading tone per manual throw -
         // see onBeat/executeThrow below and Soundtrack itself. Always
         // present (App hands over a real instance), and every one of its
@@ -131,6 +133,11 @@ export default class Game {
         const { crossHeights, selfHeights } = getAvailableHeights(this.physics.getMaxHeight(), { sync: this.isSync });
         this.crossHeights = crossHeights;
         this.selfHeights = selfHeights;
+
+        // Best consecutive correct throws this "Let me try!" session -
+        // survives restart() (see there) but resets when App tears down
+        // and recreates Game on a fresh startGame() call.
+        this.maxStreak = 0;
 
         // Everything below is runtime state that a restart (see resetState/
         // restart) puts back to its just-constructed values, as opposed to
@@ -238,6 +245,13 @@ export default class Game {
         this.dangerHold = { L: null, R: null };
 
         this.lastTimestamp = performance.now();
+        this.updateStatsDisplay();
+    }
+
+    /** Refreshes the top-center streak HUD (see App's #game-stats). */
+    updateStatsDisplay() {
+        if (this.$streakValue) this.$streakValue.text(this.throwSequenceStreak);
+        if (this.$maxStreakValue) this.$maxStreakValue.text(this.maxStreak);
     }
 
     /**
@@ -581,6 +595,10 @@ export default class Game {
             this.throwSequenceStarted = true;
             this.throwSequencePending.delete(hand);
             this.throwSequenceStreak += 1;
+            if (this.throwSequenceStreak > this.maxStreak) {
+                this.maxStreak = this.throwSequenceStreak;
+            }
+            this.updateStatsDisplay();
             if (this.throwSequenceStreak >= this.paths.length) {
                 this.throwSequenceHidden = false;
             }
@@ -596,6 +614,7 @@ export default class Game {
             }
         } else if (this.throwSequenceStarted) {
             this.throwSequenceStreak = 0;
+            this.updateStatsDisplay();
             this.throwSequenceHidden = true;
             this.soundtrackSuccessCount = 0;
             this.soundtrack.resetProgression();

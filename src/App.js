@@ -31,6 +31,9 @@ export default class App {
         this.$stopButton = $('#stop-button');
         this.$restartButton = $('#restart-button');
         this.$muteButton = $('#mute-button');
+        this.$settingsButton = $('#settings-button');
+        this.$streakValue = $('#streak-value');
+        this.$maxStreakValue = $('#max-streak-value');
         this.$validationIcon = $('#validation-icon');
         this.$bpmSlider = $('#bpm-slider');
         this.$bpmValue = $('#bpm-value');
@@ -409,6 +412,8 @@ export default class App {
                 renderer: this.renderer,
                 $beatBar: this.$beatBar,
                 $beatBarWrap: this.$beatBarWrap,
+                $streakValue: this.$streakValue,
+                $maxStreakValue: this.$maxStreakValue,
                 soundtrack: this.soundtrack,
             });
             this.game.start();

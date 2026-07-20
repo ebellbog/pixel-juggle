@@ -49,6 +49,17 @@
             <div id="beat-bar-wrap" class="hidden">
                 <div id="beat-bar"></div>
             </div>
+            <div id="game-stats">
+                <div class="stat stat-before">
+                    <span class="stat-label">Streak</span>
+                    <span id="streak-value" class="stat-value">0</span>
+                </div>
+                <div class="stat-divider" aria-hidden="true"></div>
+                <div class="stat stat-after">
+                    <span class="stat-label">Best</span>
+                    <span id="max-streak-value" class="stat-value">0</span>
+                </div>
+            </div>
             <div id="bpm-control">
                 <label for="bpm-slider">BPM</label>
                 <div id="bpm-slider-wrap">
@@ -59,7 +70,13 @@
         </div>
         <!-- Demo/game chrome: replaces the old text Stop/Restart buttons and
              the whole idle-state header once something is actually running
-             (see body.mode-demo/mode-game in index.less). -->
+             (see body.mode-demo/mode-game in index.less). Material Symbols
+             Outlined at a light weight (see .material-symbols-outlined above)
+             gives the large, thin look the old Font Awesome setup was
+             approximating. -->
+        <button id="settings-button" class="icon-button" title="Settings">
+            <span class="material-symbols-outlined" aria-hidden="true">settings</span>
+        </button>
         <div id="game-controls">
             <button id="mute-button" class="icon-button" title="Mute">
                 <span class="material-symbols-outlined" aria-hidden="true">volume_up</span>

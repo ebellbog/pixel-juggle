@@ -5,6 +5,7 @@ import Renderer from './Renderer.js';
 import Game from './Game.js';
 import Soundtrack from './Soundtrack.js';
 import Settings from './Settings.js';
+import MenuOrbAnimation from './MenuOrbAnimation.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 
 const DEFAULT_BPM = 60;
@@ -23,12 +24,13 @@ export default class App {
     constructor() {
         this.$body = $(document.body);
         this.$patternSelectWrap = $('#pattern-select-wrap');
+        this.$patternPicker = document.getElementById('pattern-picker');
         this.$patternSelectTrigger = $('#pattern-select-trigger');
         this.$patternSelectList = $('#pattern-select-list');
         this.$customInputWrap = $('#custom-input-wrap');
         this.$input = $('#siteswap-input');
-        this.$showMeButton = $('#show-me-button');
-        this.$tryButton = $('#try-button');
+        this.$menuButtons = $('#menu-buttons');
+        this.$menuSpacer = $('#menu-spacer');
         this.$stopButton = $('#stop-button');
         this.$restartButton = $('#restart-button');
         this.$muteButton = $('#mute-button');
@@ -65,6 +67,7 @@ export default class App {
         // toggled mid-demo stays muted if the player then switches to "Let me
         // try!" without needing to reconcile two separate mute states.
         this.soundtrack = new Soundtrack({ settings: this.settings });
+        this.menuOrbAnimation = new MenuOrbAnimation(this.$patternPicker);
         this.siteswap = null;
         // Only set while the "Show me" demo animation is actually running.
         this.simulator = null;
@@ -159,11 +162,13 @@ export default class App {
         if (value === CUSTOM_PATTERN_VALUE) {
             this.renderPatternTrigger('Custom\u2026');
             this.$customInputWrap.removeClass('hidden');
+            this.$menuSpacer.addClass('hidden');
             this.$input.trigger('focus');
         } else {
             const pattern = findPattern(value);
             this.renderPatternTrigger(pattern.name);
             this.$customInputWrap.addClass('hidden');
+            this.$menuSpacer.removeClass('hidden');
             this.$input.val(value);
             this.$patternSelectList
                 .find('.pattern-select-option')
@@ -202,8 +207,11 @@ export default class App {
                 this.startDemo();
             }
         });
-        this.$showMeButton.on('click', () => this.startDemo());
-        this.$tryButton.on('click', () => this.startGame());
+        this.$menuButtons.on('click', '[data-action]', (event) => {
+            const $button = $(event.currentTarget);
+            if ($button.prop('disabled')) return;
+            this.handleMenuAction($button.attr('data-action'));
+        });
         this.$stopButton.on('click', () => this.stop());
         this.$restartButton.on('click', () => this.restart());
         this.$muteButton.on('click', () => {
@@ -331,6 +339,8 @@ export default class App {
     setMode(mode) {
         this.mode = mode;
         this.$body.attr('class', `mode-${mode}`);
+        if (mode === 'menu') this.menuOrbAnimation.start();
+        else this.menuOrbAnimation.stop();
     }
 
     setBpm(bpm) {
@@ -359,6 +369,26 @@ export default class App {
         }
     }
 
+    /** Dispatches a title-screen menu button press (see #menu-buttons' data-action). */
+    handleMenuAction(action) {
+        switch (action) {
+            case 'show-me':
+                this.startDemo();
+                break;
+            case 'try':
+                this.startGame();
+                break;
+            case 'tutorial':
+                // TODO: guided tutorial mode.
+                break;
+            case 'compete':
+                // TODO: competitive/challenge mode.
+                break;
+            default:
+                break;
+        }
+    }
+
     validate() {
         // Editing the pattern always stops any running demo/game; the
         // player must choose an action again to watch (or practice) the
@@ -370,11 +400,9 @@ export default class App {
         this.siteswap = SyncSiteswap.looksLikeSync(raw) ? SyncSiteswap.parse(raw) : Siteswap.parse(raw);
 
         if (this.siteswap.isValid) {
-            this.$showMeButton.prop('disabled', false);
-            this.$tryButton.prop('disabled', false);
+            this.$menuButtons.find('[data-action]').prop('disabled', false);
         } else {
-            this.$showMeButton.prop('disabled', true);
-            this.$tryButton.prop('disabled', true);
+            this.$menuButtons.find('[data-action]').prop('disabled', true);
         }
 
         this.updateValidationIcon(isCustom, raw);

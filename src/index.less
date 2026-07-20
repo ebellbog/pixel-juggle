@@ -8,7 +8,7 @@
 // read as the same colors the actual juggling balls use.
 @orb-top: #f58231;
 @orb-bottom: #911eb4;
-@orb-picker: #42d4f4;
+@orb-picker: #42f4f1;
 
 @accent: desaturate(@orb-picker, 65%);
 
@@ -32,6 +32,15 @@
     font-size: 13px;
     letter-spacing: .2px;
     opacity: .7;
+}
+
+// Title-screen action buttons (#menu-buttons .action-button) - pass any fill
+// color; border and offset shadow share the same darkened shade.
+.action-button-style(@color, @darken-amount: 18%) {
+    @shade: darken(@color, @darken-amount);
+    background-color: @color;
+    border: 2px solid @shade;
+    box-shadow: 2px 2px 0 @shade;
 }
 
 html,
@@ -125,21 +134,6 @@ body.mode-game {
 
 // --- Title screen (menu) ----------------------------------------------
 
-// Gradients are discrete image values — animating `background` between two
-// repeating-linear-gradient() stops does nothing. Register an angle variable
-// so keyframes can spin the stripe direction smoothly.
-@property --orb-stripe-angle {
-    syntax: '<angle>';
-    initial-value: 0deg;
-    inherits: false;
-}
-
-@keyframes orb-stripe-spin {
-    to {
-        --orb-stripe-angle: 360deg;
-    }
-}
-
 #title-screen {
     position: relative;
     flex-direction: column;
@@ -166,9 +160,10 @@ body.mode-game {
 }
 
 // Centered on the title screen. Each decorative orb is its own 340px
-// circle (::before top, ::after bottom); the purple disc sits between
-// them and the controls via .pattern-picker-disc (only two pseudos
-// available, and the element's own background paints as a square tile).
+// circle (::before top, ::after bottom); positions follow a two-link
+// hinged path driven by MenuOrbAnimation.js (--orb-* variables below).
+// The purple disc sits between the orbs and the controls via
+// .pattern-picker-disc (only two pseudos available).
 #pattern-picker {
     position: absolute;
     top: 50%;
@@ -180,7 +175,7 @@ body.mode-game {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
+    gap: 12px;
     padding: 0 40px;
     box-sizing: border-box;
     text-align: center;
@@ -189,23 +184,21 @@ body.mode-game {
     &::after {
         content: '';
         position: absolute;
+        top: 50%;
         left: 50%;
-        width: 380px;
-        height: 380px;
-        transform: translate(-50%, -50%);
+        width: 320px;
+        height: 320px;
+        transform: translate(calc(-50% + var(--orb-top-x, 0px)), calc(-50% + var(--orb-top-y, -120px)));
         border-radius: 50%;
         border: 1px solid white;
         pointer-events: none;
         z-index: 0;
-        --orb-stripe-angle: 0deg;
-        // animation: orb-stripe-spin 120s linear infinite;
     }
 
     &::before {
-        top: calc(50% - 70px);
-        // background: radial-gradient(circle at 35% 30%, fade(@orb-top, 95%), fade(@orb-top, 5%));
+        // Screen-fixed stripe angle — orbs only translate, never rotate.
         background: repeating-linear-gradient(
-            calc(-10deg + var(--orb-stripe-angle)),
+            -10deg,
             #fff,
             #fff 4px,
             @bg 4px,
@@ -214,26 +207,22 @@ body.mode-game {
     }
 
     &::after {
-        top: calc(50% + 70px);
-        // background: radial-gradient(circle at 65% 70%, fade(@orb-bottom, 95%), fade(@orb-bottom, 5%));
+        transform: translate(calc(-50% + var(--orb-bottom-x, 0px)), calc(-50% + var(--orb-bottom-y, 120px)));
         background: repeating-linear-gradient(
-            calc(80deg + var(--orb-stripe-angle)),
+            80deg,
             #fff,
             #fff .75px,
             @bg .75px,
             @bg 12px
         );
-        // animation-direction: reverse;
     }
 
     .pattern-picker-disc {
         position: absolute;
         inset: 0;
         border-radius: 50%;
-        // background: radial-gradient(@orb-picker, darken(@orb-picker, 50%));
         background-color: @bg;
         border: 1px solid white;
-        // box-shadow: 0 0 40px fade(@orb-picker, 45%);
         pointer-events: none;
         z-index: 1;
     }
@@ -448,13 +437,10 @@ body.mode-game {
 }
 
 #menu-buttons {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
     gap: 10px;
     width: 100%;
-
-    .action-button {
-        flex: 1;
-    }
 }
 
 .action-button {
@@ -462,12 +448,10 @@ body.mode-game {
     font-size: 16px;
     font-weight: bold;
     letter-spacing: .5px;
-    padding: 8px 12px 8px 6px;
-    border: none;
+    padding: 6px 12px 6px 6px;
     border-radius: 50px;
     color: white;
     cursor: pointer;
-    box-shadow: 2px 3px 0 fade(white, 60%);
     transition: all 0.15s ease, transform 0.1s ease;
 
     .button-icon {
@@ -477,9 +461,9 @@ body.mode-game {
     }
 
     &:hover:not(:disabled) {
-        filter: brightness(1.1);
+        filter: brightness(1.2);
         box-shadow: none;
-        transform: translate(2px, 3px);
+        transform: translate(2px, 2px);
     }
 
     &:active:not(:disabled) {
@@ -492,15 +476,20 @@ body.mode-game {
         box-shadow: none;
     }
 
-    &.secondary {
-        border: 1px solid fade(white, 60%);
-        background-color: @bg;//darken(@orb-top, 20%);
+    &[data-action="show-me"] {
+        .action-button-style(@orb-top);
     }
 
-    &.primary {
-        border: 1px solid @bg;
-        background-color: white; //@orb-bottom;
-        color: @bg;
+    &[data-action="try"] {
+        .action-button-style(@orb-bottom);
+    }
+
+    &[data-action="tutorial"] {
+        .action-button-style(darken(@orb-picker, 20%));
+    }
+
+    &[data-action="compete"] {
+        .action-button-style(@invalid);
     }
 }
 

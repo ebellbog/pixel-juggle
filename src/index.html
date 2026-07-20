@@ -28,22 +28,29 @@
                     <ul id="pattern-select-list" class="pattern-select-list hidden" role="listbox"></ul>
                 </div>
                 <div id="custom-input-wrap" class="hidden">
-                        <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
-                            autocorrect="off" spellcheck="false" placeholder="e.g. 531">
-                        <span id="validation-icon" class="hidden" title="">
-                            <span class="material-symbols-outlined" aria-hidden="true"></span>
-                        </span>
-                    </div>
-                    <div id="menu-buttons">
-                        <button id="show-me-button" class="action-button secondary" disabled>
-                            <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
-                        </button>
-                        <button id="try-button" class="action-button primary" disabled>
-                            <span class="material-symbols-outlined button-icon" aria-hidden="true">person_play</span> Let me try
-                        </button>
-                    </div>
+                    <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
+                        autocorrect="off" spellcheck="false" placeholder="e.g. 531">
+                    <span id="validation-icon" class="hidden" title="">
+                        <span class="material-symbols-outlined" aria-hidden="true"></span>
+                    </span>
+                </div>
+                <div id="menu-spacer"></div>
+                <div id="menu-buttons">
+                    <button type="button" class="action-button" data-action="tutorial" disabled>
+                        <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
+                    </button>
+                    <button type="button" class="action-button" data-action="show-me" disabled>
+                        <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
+                    </button>
+                    <button type="button" class="action-button" data-action="try" disabled>
+                        <span class="material-symbols-outlined button-icon" aria-hidden="true">person_play</span> Practice
+                    </button>
+                    <button type="button" class="action-button" data-action="compete" disabled>
+                        <span class="material-symbols-outlined button-icon" aria-hidden="true">emoji_events</span> Compete
+                    </button>
                 </div>
             </div>
+        </div>
         <div id="canvas-area">
             <canvas id="juggle-canvas"></canvas>
             <div id="beat-bar-wrap" class="hidden">

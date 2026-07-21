@@ -59,14 +59,25 @@
                         <!-- Difficulty pick - slides in from the right when "Juggle"
                              is pressed (see App.setPickerPanel). -->
                         <div id="picker-difficulty-panel" class="picker-panel" data-picker-panel="difficulty">
-                            <div id="difficulty-select">
+                            <div class="picker-panel-button-row">
                                 <button type="button" class="action-button" data-action="difficulty-easier">Easier</button>
                                 <button type="button" class="action-button" data-action="difficulty-normal">Normal</button>
                                 <button type="button" class="action-button" data-action="difficulty-harder">Harder</button>
                             </div>
-                            <button type="button" class="action-button" id="practice-button" data-action="practice">
-                                Practice
+                            <button type="button" class="action-button action-button-muted-full-width" data-action="practice">
+                                Practice mode
                             </button>
+                        </div>
+                        <!-- Tutorial pick - slides in from the right when "Tutorial"
+                             is pressed (see App.setPickerPanel). -->
+                        <div id="picker-tutorial-panel" class="picker-panel" data-picker-panel="tutorial">
+                            <button type="button" class="action-button action-button-muted-full-width" data-action="interactive-tutorial">
+                                Interactive tutorial
+                            </button>
+                            <div class="picker-panel-button-row">
+                                <button type="button" class="action-button" data-action="tutorial-controls">Controls</button>
+                                <button type="button" class="action-button" data-action="tutorial-siteswap-basic">Siteswap basics</button>
+                            </div>
                         </div>
                     </div>
                 </div>

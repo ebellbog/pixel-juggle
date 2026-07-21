@@ -13,6 +13,18 @@
 @orb-pink: rgb(224, 0, 176);
 @warning: #e6b800; // Same family as @valid/@invalid — "Normal" difficulty.
 
+// Title-screen action-button fills (see .action-button[data-action] below).
+@action-muted: @bg; // Practice, Interactive tutorial — dark fill, white outline.
+@action-controls: #4589e6;
+@action-siteswap-basic: #5ec98a;
+@action-tutorial: darken(@orb-picker, 20%);
+@action-show-me: @orb-pink;
+@action-try: @orb-bottom;
+@action-leaderboard: @orb-top;
+@action-difficulty-easier: @orb-lime;
+@action-difficulty-normal: @warning;
+@action-difficulty-harder: @invalid;
+
 @accent: desaturate(@orb-picker, 65%);
 
 @border-radius-small: 4px;
@@ -77,6 +89,41 @@
     }
     &:not(:disabled, :hover) {
         box-shadow: 2px 2px 0 @shade;
+    }
+}
+
+// Full-width dark sub-menu primary (Practice, Interactive tutorial).
+.action-button-muted-full-width() {
+    .action-button-style(@action-muted);
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+
+    // .action-button-style()'s own &:not(:disabled) border rule above
+    // outweighs a plain border-color/border-width override here (both are
+    // one class deep, but :not(:disabled) adds pseudo-class specificity) -
+    // matching its selector depth is what lets these actually win.
+    &:not(:disabled) {
+        border-color: white;
+        border-width: 1px;
+    }
+
+    &:not(:hover) {
+        box-shadow: 2px 2px 0 darken(white, 25%);
+    }
+}
+
+// Horizontal row of equal-width sub-menu buttons (difficulty pick, tutorial
+// secondary actions, etc.).
+.picker-panel-button-row() {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+
+    .action-button {
+        flex: 1;
+        text-align: center;
+        padding-right: 5px;
     }
 }
 
@@ -319,7 +366,13 @@ body.mode-game {
 // active column into view. Track and panel widths are both derived from
 // --picker-panel-count so each column is exactly one viewport wide (a bare
 // flex: 0 0 100% on the panels would leave the track indefinite and the
-// browser splits the viewport 50/50).
+// browser splits the viewport 50/50). --picker-panel-count is always 2,
+// regardless of how many total sub-menus exist (see PICKER_PANELS in
+// App.js) - there are only ever two horizontal slots on screen at once:
+// main, and whichever single sub-menu is currently active (see
+// .picker-panel--active-sub below), so switching between two different
+// sub-menus (e.g. difficulty -> tutorial) can't visibly slide through
+// whichever one isn't selected.
 #picker-panels-track {
     position: relative;
     z-index: 0;
@@ -341,6 +394,21 @@ body.mode-game {
     gap: 14px;
     padding: 0 40px;
     box-sizing: border-box;
+    // Sub-menus default to sitting past the second (and only other) slot,
+    // clipped by #picker-panels-viewport, until App.setPickerPanel makes
+    // one the active one.
+    order: 2;
+}
+
+#picker-main-panel {
+    order: 0;
+}
+
+// The one sub-menu currently slid into view (see App.setPickerPanel) -
+// takes the slot right after main; every other sub-menu stays past it at
+// the default order: 2, out of view regardless of which is active.
+.picker-panel--active-sub {
+    order: 1;
 }
 
 #pattern-select-wrap {
@@ -559,28 +627,12 @@ body.mode-game {
     // }
 }
 
-#difficulty-select {
-    display: flex;
-    gap: 10px;
-    width: 100%;
-
-    .action-button {
-        flex: 1;
-        text-align: center;
-        padding-right: 5px;
-    }
+.picker-panel-button-row {
+    .picker-panel-button-row();
 }
 
-#practice-button {
-    width: 100%;
-    box-sizing: border-box;
-    text-align: center;
-    border-color: white;
-    border-width: 1px;
-
-    &:not(:hover) {
-        box-shadow: 2px 2px 0 darken(white, 25%);
-    }
+.action-button-muted-full-width {
+    .action-button-muted-full-width();
 }
 
 #title-credits {
@@ -635,15 +687,15 @@ body.mode-game {
     }
 
     &[data-action="show-me"] {
-        .action-button-style(@orb-pink);
+        .action-button-style(@action-show-me);
     }
 
     &[data-action="try"] {
-        .action-button-style(@orb-bottom);
+        .action-button-style(@action-try);
     }
 
     &[data-action="tutorial"] {
-        .action-button-style(darken(@orb-picker, 20%));
+        .action-button-style(@action-tutorial);
     }
 
     &[data-action="compete"] {
@@ -651,26 +703,30 @@ body.mode-game {
     }
 
     &[data-action="leaderboard"] {
-        .action-button-style(@orb-top);
+        .action-button-style(@action-leaderboard);
     }
 
     // Difficulty pick (#picker-difficulty-panel) - actual buttons that each
     // start a game at that difficulty (not a radio-style toggle), so they
     // get the same colored-CTA treatment as the rest of #menu-buttons.
     &[data-action="difficulty-easier"] {
-        .action-button-style(@orb-lime);
+        .action-button-style(@action-difficulty-easier);
     }
 
     &[data-action="difficulty-normal"] {
-        .action-button-style(@warning);
+        .action-button-style(@action-difficulty-normal);
     }
 
     &[data-action="difficulty-harder"] {
-        .action-button-style(@invalid);
+        .action-button-style(@action-difficulty-harder);
     }
 
-    &[data-action="practice"] {
-        .action-button-style(@bg);
+    &[data-action="tutorial-controls"] {
+        .action-button-style(@action-controls);
+    }
+
+    &[data-action="tutorial-siteswap-basic"] {
+        .action-button-style(@action-siteswap-basic);
     }
 }
 
@@ -878,18 +934,36 @@ body.mode-game {
 }
 
 // --- Modals (settings, credits, …) ------------------------------------
+// Opacity/visibility crossfade (not display:none) so open/close can animate.
+// .hidden still toggles visibility in App.js; display:flex !important here
+// overrides the global .hidden rule for this layer only.
+
+@modal-fade-duration: 0.4s;
+@modal-fade-easing: ease;
+
+.modal-layer-transition() {
+    transition: opacity @modal-fade-duration @modal-fade-easing,
+        visibility @modal-fade-duration @modal-fade-easing;
+}
 
 .app-modal-overlay {
-    display: none;
+    display: flex !important;
     position: fixed;
     inset: 0;
-    background-color: fade(black, 75%);
+    background-color: fade(black, 50%);
+    backdrop-filter: blur(2px);
     align-items: center;
     justify-content: center;
     z-index: 100;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    .modal-layer-transition();
 
     &:not(.hidden) {
-        display: flex;
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
     }
 }
 
@@ -902,9 +976,15 @@ body.mode-game {
     box-sizing: border-box;
     padding: 32px 32px 28px;
     background-color: @bg;
-    border: 1px solid white;
+    border: 1px solid darken(white, 35%);
     border-radius: @border-radius-small;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+    opacity: 0;
+    .modal-layer-transition();
+
+    .app-modal-overlay:not(.hidden) & {
+        opacity: 1;
+    }
 
     .app-modal-close {
         position: absolute;
@@ -914,6 +994,13 @@ body.mode-game {
         .material-symbols-outlined {
             font-size: 26px;
         }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-modal-overlay,
+    .app-modal {
+        transition: none;
     }
 }
 
@@ -955,7 +1042,7 @@ body.mode-game {
 
 .settings-group-label {
     .form-label-style();
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 .settings-option-row,

@@ -15,9 +15,12 @@ const SCREEN_FADE_MS = 550;
 // Keep in sync with @picker-panel-slide-duration in index.less.
 const PICKER_PANEL_SLIDE_MS = 350;
 
-// Ordered left-to-right on #picker-panels-track (main first, sub-menus after).
-// Add future sub-menus here and as another .picker-panel sibling in index.html.
-const PICKER_PANELS = ['main', 'difficulty'];
+// Valid #picker-panels-track panel ids - main first, sub-menus after. Add
+// future sub-menus here and as another .picker-panel sibling in index.html.
+// Only two horizontal slots ever exist on screen at once (main, and
+// whichever single sub-menu is active - see setPickerPanel), so this
+// array's order doesn't affect layout, just which ids are recognized.
+const PICKER_PANELS = ['main', 'difficulty', 'tutorial'];
 
 function waitMs(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -444,7 +447,7 @@ export default class App {
                 this.startGame();
                 break;
             case 'tutorial':
-                // TODO: guided tutorial mode.
+                this.setPickerPanel('tutorial');
                 break;
             case 'compete':
                 // TODO: competitive/challenge mode.
@@ -464,23 +467,31 @@ export default class App {
 
     /** Sets up the horizontal picker track (see #picker-panels-* in index.less). */
     initPickerPanels() {
-        this.$patternPicker.style.setProperty('--picker-panel-count', PICKER_PANELS.length);
+        // Always 2, not PICKER_PANELS.length - see the matching comment on
+        // #picker-panels-track in index.less for why.
+        this.$patternPicker.style.setProperty('--picker-panel-count', 2);
         this.setPickerPanel(PICKER_PANELS[0], { instant: true });
     }
 
     /**
      * Slides #picker-panels-track to the named panel. Main is leftmost;
-     * sub-menus sit to its right and slide in when selected.
-     * #picker-back-button stays fixed on the viewport and fades in for any sub-menu.
+     * whichever sub-menu is named slides in from the right (see
+     * .picker-panel--active-sub in index.less - CSS order, not this
+     * method's index, is what actually places it there), so switching
+     * straight from one sub-menu to another never visibly passes through
+     * a third. #picker-back-button stays fixed on the viewport and fades
+     * in for any sub-menu.
      */
     setPickerPanel(panelId, { instant = false } = {}) {
-        const index = PICKER_PANELS.indexOf(panelId);
-        if (index < 0) return;
+        if (!PICKER_PANELS.includes(panelId)) return;
 
         if (panelId !== PICKER_PANELS[0]) this.setPatternListOpen(false);
 
+        const previousPanelId = this.pickerPanelId;
         this.pickerPanelId = panelId;
         const onSubMenu = panelId !== PICKER_PANELS[0];
+        const wasOnSubMenu = previousPanelId !== PICKER_PANELS[0];
+        const index = onSubMenu ? 1 : 0;
         const track = this.$pickerPanelsTrack[0];
         const backButton = this.$pickerBackButton[0];
         if (instant) {
@@ -495,6 +506,31 @@ export default class App {
             const isActive = panel.getAttribute('data-picker-panel') === panelId;
             panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
         });
+
+        // The incoming sub-menu (if any) has to claim the shared slot right
+        // away, before the slide even starts - it needs to already be
+        // sitting there for the slide's very first frame.
+        if (onSubMenu) {
+            this.$pickerPanelsTrack.find(`[data-picker-panel="${panelId}"]`).addClass('picker-panel--active-sub');
+        }
+        // The outgoing sub-menu (if any), conversely, only gives the slot up
+        // once it's actually finished sliding out of view - order isn't
+        // animatable, so releasing it immediately would let whichever
+        // *other* sub-menu is next in DOM order instantly (not gradually)
+        // take its place mid-slide, flashing that other panel's content in
+        // transit (see .picker-panel--active-sub in index.less).
+        if (wasOnSubMenu && previousPanelId !== panelId) {
+            const $outgoing = this.$pickerPanelsTrack.find(`[data-picker-panel="${previousPanelId}"]`);
+            if (instant) {
+                $outgoing.removeClass('picker-panel--active-sub');
+            } else {
+                setTimeout(() => {
+                    if (this.pickerPanelId !== panelId) return; // Superseded by a newer call before the slide settled.
+                    $outgoing.removeClass('picker-panel--active-sub');
+                }, PICKER_PANEL_SLIDE_MS);
+            }
+        }
+
         if (instant) {
             // Force reflow so the next slide/fade still animates.
             track.offsetHeight;

@@ -21,36 +21,56 @@
                 <div class="menu-orb menu-orb--dots" aria-hidden="true"></div>
                 <!-- Purple disc between the orbs and the controls. -->
                 <div class="pattern-picker-disc" aria-hidden="true"></div>
-                <div id="pattern-select-wrap">
-                    <button type="button" id="pattern-select-trigger" aria-haspopup="listbox" aria-expanded="false">
-                        <span class="pattern-name"></span>
-                        <span class="material-symbols-outlined pattern-select-caret" aria-hidden="true">expand_more</span>
-                    </button>
-                    <ul id="pattern-select-list" class="pattern-select-list hidden" role="listbox"></ul>
+                <!-- Pattern pick + top-level actions - fades out in favor of
+                     #picker-difficulty-panel once "Juggle" is pressed (see
+                     App.showDifficultyPanel). -->
+                <div id="picker-main-panel" class="picker-panel">
+                    <div id="pattern-select-wrap">
+                        <button type="button" id="pattern-select-trigger" aria-haspopup="listbox" aria-expanded="false">
+                            <span class="pattern-name"></span>
+                            <span class="material-symbols-outlined pattern-select-caret" aria-hidden="true">expand_more</span>
+                        </button>
+                        <ul id="pattern-select-list" class="pattern-select-list hidden" role="listbox"></ul>
+                    </div>
+                    <div id="custom-input-wrap" class="hidden">
+                        <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
+                            autocorrect="off" spellcheck="false" placeholder="e.g. 531">
+                        <span id="validation-icon" class="hidden" title="">
+                            <span class="material-symbols-outlined" aria-hidden="true"></span>
+                        </span>
+                    </div>
+                    <div id="menu-spacer"></div>
+                    <div id="menu-buttons">
+                        <button type="button" class="action-button" data-action="tutorial" disabled>
+                            <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
+                        </button>
+                        <button type="button" class="action-button" data-action="show-me" disabled>
+                            <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
+                        </button>
+                        <button type="button" class="action-button" data-action="try" disabled>
+                            <span class="material-symbols-outlined button-icon" aria-hidden="true">person_play</span> Juggle
+                        </button>
+                        <button type="button" class="action-button" data-action="leaderboard">
+                            <span class="material-symbols-outlined button-icon" aria-hidden="true">leaderboard</span> Scores
+                        </button>
+                    </div>
                 </div>
-                <div id="custom-input-wrap" class="hidden">
-                    <input id="siteswap-input" type="text" autocomplete="off" autocapitalize="off"
-                        autocorrect="off" spellcheck="false" placeholder="e.g. 531">
-                    <span id="validation-icon" class="hidden" title="">
-                        <span class="material-symbols-outlined" aria-hidden="true"></span>
-                    </span>
-                </div>
-                <div id="menu-spacer"></div>
-                <div id="menu-buttons">
-                    <button type="button" class="action-button" data-action="tutorial" disabled>
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
+                <!-- Difficulty pick, shown in place of #picker-main-panel once
+                     "Juggle" is pressed. Easier/Normal/Harder are each meant
+                     to start a game at that difficulty - not implemented yet
+                     (see App.handleMenuAction) - Practice is the only one
+                     wired up so far, and starts gameplay as before. -->
+                <div id="picker-difficulty-panel" class="picker-panel picker-panel-hidden">
+                    <button type="button" id="difficulty-back-button" class="icon-button" title="Back to menu">
+                        <span class="material-symbols-outlined" aria-hidden="true">arrow_back</span>
                     </button>
-                    <button type="button" class="action-button" data-action="show-me" disabled>
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
-                    </button>
-                    <button type="button" class="action-button" data-action="try" disabled>
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">person_play</span> Practice
-                    </button>
-                    <button type="button" class="action-button" data-action="compete" disabled>
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">emoji_events</span> Compete
-                    </button>
-                    <button type="button" class="action-button" data-action="leaderboard">
-                        <span class="material-symbols-outlined button-icon" aria-hidden="true">leaderboard</span> Scores
+                    <div id="difficulty-select">
+                        <button type="button" class="action-button" data-action="difficulty-easier">Easier</button>
+                        <button type="button" class="action-button" data-action="difficulty-normal">Normal</button>
+                        <button type="button" class="action-button" data-action="difficulty-harder">Harder</button>
+                    </div>
+                    <button type="button" class="action-button" id="practice-button" data-action="practice">
+                        Practice
                     </button>
                 </div>
             </div>

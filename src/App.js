@@ -12,6 +12,8 @@ const DEFAULT_BPM = 60;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 // Keep in sync with @screen-fade-duration in index.less.
 const SCREEN_FADE_MS = 550;
+// Keep in sync with @picker-panel-fade-duration in index.less.
+const PICKER_PANEL_FADE_MS = 300;
 
 function waitMs(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -31,6 +33,9 @@ export default class App {
         this.$body = $(document.body);
         this.$patternSelectWrap = $('#pattern-select-wrap');
         this.$patternPicker = document.getElementById('pattern-picker');
+        this.$pickerMainPanel = $('#picker-main-panel');
+        this.$pickerDifficultyPanel = $('#picker-difficulty-panel');
+        this.$difficultyBackButton = $('#difficulty-back-button');
         this.$patternSelectTrigger = $('#pattern-select-trigger');
         this.$patternSelectList = $('#pattern-select-list');
         this.$customInputWrap = $('#custom-input-wrap');
@@ -90,6 +95,10 @@ export default class App {
         // rather than going ahead and starting a second simulator/game on
         // top of whatever's now actually current.
         this.startToken = 0;
+        // Bumped on every showDifficultyPanel() call - lets a fade-in
+        // that's still pending (see there) recognize it's been superseded
+        // by a newer call before its timeout fires.
+        this.difficultyFadeToken = 0;
         this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
         this.patternValue = PATTERN_GROUPS[0].patterns[0].value;
 
@@ -221,6 +230,7 @@ export default class App {
             if ($button.prop('disabled')) return;
             this.handleMenuAction($button.attr('data-action'));
         });
+        this.$difficultyBackButton.on('click', () => this.showDifficultyPanel(false));
         this.$stopButton.on('click', () => this.stop());
         this.$restartButton.on('click', () => this.restart());
         this.$muteButton.on('click', () => {
@@ -262,6 +272,7 @@ export default class App {
             if (event.key !== 'Escape') return;
             if (!this.$creditsOverlay.hasClass('hidden')) this.closeCredits();
             else if (!this.$settingsOverlay.hasClass('hidden')) this.closeSettings();
+            else if (!this.$pickerDifficultyPanel.hasClass('picker-panel-hidden')) this.showDifficultyPanel(false);
         });
 
         this.$settingsOverlay.find('.settings-option-row').on('click', '.settings-option', (event) => {
@@ -412,6 +423,12 @@ export default class App {
                 this.startDemo();
                 break;
             case 'try':
+                // "Juggle" no longer starts gameplay directly - it opens the
+                // difficulty pick instead (see showDifficultyPanel). Practice
+                // is the only one of its options that actually starts a game.
+                this.showDifficultyPanel(true);
+                break;
+            case 'practice':
                 this.startGame();
                 break;
             case 'tutorial':
@@ -423,9 +440,33 @@ export default class App {
             case 'leaderboard':
                 // TODO: leaderboard screen.
                 break;
+            case 'difficulty-easier':
+            case 'difficulty-normal':
+            case 'difficulty-harder':
+                // TODO: start gameplay at the chosen difficulty.
+                break;
             default:
                 break;
         }
+    }
+
+    /**
+     * Swaps #picker-main-panel and #picker-difficulty-panel in place within
+     * the orb (see .picker-panel in index.less) - fading the outgoing panel
+     * all the way out before fading the incoming one in, rather than
+     * cross-dissolving between them. Also the "back to menu" target for
+     * #difficulty-back-button.
+     */
+    showDifficultyPanel(show) {
+        const $from = show ? this.$pickerMainPanel : this.$pickerDifficultyPanel;
+        const $to = show ? this.$pickerDifficultyPanel : this.$pickerMainPanel;
+        const token = ++this.difficultyFadeToken;
+
+        $from.addClass('picker-panel-hidden');
+        setTimeout(() => {
+            if (token !== this.difficultyFadeToken) return; // Superseded by a newer call before we settled.
+            $to.removeClass('picker-panel-hidden');
+        }, PICKER_PANEL_FADE_MS);
     }
 
     validate() {
@@ -641,5 +682,8 @@ export default class App {
         this.soundtrack.stopAll();
         this.renderer.draw({ balls: [] });
         this.setMode('menu');
+        // Land back on the pattern pick, not wherever the difficulty panel
+        // happened to be left (e.g. stopping mid-game via Practice).
+        this.showDifficultyPanel(false);
     }
 }

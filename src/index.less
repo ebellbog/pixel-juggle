@@ -10,6 +10,8 @@
 @orb-bottom: #911eb4;
 @orb-picker: #42f4f1;
 @orb-lime: #6eac30; // Ball palette lime — leaderboard button.
+@orb-pink: rgb(224, 0, 176);
+@warning: #e6b800; // Same family as @valid/@invalid — "Normal" difficulty.
 
 @accent: desaturate(@orb-picker, 65%);
 
@@ -25,6 +27,23 @@
 
 @media (prefers-reduced-motion: reduce) {
     .screen-layer-transition() {
+        transition: none;
+    }
+}
+
+// #picker-main-panel/#picker-difficulty-panel (see App.showDifficultyPanel)
+// fade to black then back in, rather than cross-dissolving - App.js
+// sequences the two panels' class toggles half a beat apart, so each half
+// just needs its own one-way fade. Keep in sync with PICKER_PANEL_FADE_MS.
+@picker-panel-fade-duration: 0.3s;
+
+.picker-panel-transition() {
+    transition: opacity @picker-panel-fade-duration ease,
+        visibility @picker-panel-fade-duration ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .picker-panel-transition() {
         transition: none;
     }
 }
@@ -212,7 +231,11 @@ body.mode-game {
 
 // Centered on the title screen. Three decorative orbs (.menu-orb) follow a
 // two-link hinged path driven by MenuOrbAnimation.js. The purple disc sits
-// between the orbs and the controls via .pattern-picker-disc.
+// between the orbs and the controls via .pattern-picker-disc. Content is
+// split into two overlapping .picker-panel layers (pattern pick + top-level
+// actions, and the difficulty pick shown after "Juggle" - see
+// App.showDifficultyPanel) that crossfade in place rather than resizing
+// the orb.
 #pattern-picker {
     position: absolute;
     top: 50%;
@@ -220,12 +243,6 @@ body.mode-game {
     transform: translate(-50%, -50%);
     width: 380px;
     height: 380px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    padding: 0 40px;
     box-sizing: border-box;
     text-align: center;
 
@@ -282,9 +299,28 @@ body.mode-game {
         z-index: 1;
     }
 
-    > :not(.pattern-picker-disc):not(.menu-orb):not(#pattern-select-wrap) {
-        position: relative;
-        z-index: 2;
+}
+
+.picker-panel {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 0 40px;
+    box-sizing: border-box;
+    .picker-panel-transition();
+
+    // Distinct from the shared .hidden utility (display: none), which would
+    // block the fade entirely - see body.mode-menu et al. for the same
+    // pattern at the whole-screen level.
+    &.picker-panel-hidden {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
     }
 }
 
@@ -496,12 +532,46 @@ body.mode-game {
     grid-template-columns: 1fr 1fr;
     gap: 10px;
     width: 100%;
-    margin-bottom: -45px;
+    margin-bottom: -12px;
 
-    .action-button[data-action="leaderboard"] {
-        grid-column: 1 / -1;
-        justify-self: center;
-        width: 50%;
+    // .action-button[data-action="leaderboard"] {
+    //     grid-column: 1 / -1;
+    //     justify-self: center;
+    //     width: 50%;
+    // }
+}
+
+// Difficulty pick shown in #picker-difficulty-panel after "Juggle" (see
+// App.showDifficultyPanel). Back arrow sits above the option rows, pinned to
+// the panel's own top-left corner rather than taking up flex flow space.
+#difficulty-back-button {
+    position: absolute;
+    top: 20%;
+    left: 15%;
+    transform: translateX(-50%);
+}
+
+#difficulty-select {
+    display: flex;
+    gap: 10px;
+    width: 100%;
+
+    .action-button {
+        flex: 1;
+        text-align: center;
+        padding-right: 5px;
+    }
+}
+
+#practice-button {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    border-color: white;
+    border-width: 1px;
+
+    &:not(:hover) {
+        box-shadow: 2px 2px 0 darken(white, 25%);
     }
 }
 
@@ -546,7 +616,7 @@ body.mode-game {
     }
 
     &:active:not(:disabled) {
-        transform: translateY(1px);
+        transform: translate(2px, 2px);
     }
 
     &:disabled {
@@ -557,7 +627,7 @@ body.mode-game {
     }
 
     &[data-action="show-me"] {
-        .action-button-style(@orb-top);
+        .action-button-style(@orb-pink);
     }
 
     &[data-action="try"] {
@@ -569,12 +639,30 @@ body.mode-game {
     }
 
     &[data-action="compete"] {
-        .action-button-style(@invalid);
+        .action-button-style(@orb-lime);
     }
 
     &[data-action="leaderboard"] {
+        .action-button-style(@orb-top);
+    }
+
+    // Difficulty pick (#picker-difficulty-panel) - actual buttons that each
+    // start a game at that difficulty (not a radio-style toggle), so they
+    // get the same colored-CTA treatment as the rest of #menu-buttons.
+    &[data-action="difficulty-easier"] {
         .action-button-style(@orb-lime);
-        // color: @bg;
+    }
+
+    &[data-action="difficulty-normal"] {
+        .action-button-style(@warning);
+    }
+
+    &[data-action="difficulty-harder"] {
+        .action-button-style(@invalid);
+    }
+
+    &[data-action="practice"] {
+        .action-button-style(@bg);
     }
 }
 

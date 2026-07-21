@@ -16,7 +16,7 @@
 // Title-screen action-button fills (see .action-button[data-action] below).
 @action-muted: @bg; // Practice, Interactive tutorial — dark fill, white outline.
 @action-controls: #4589e6;
-@action-siteswap-basic: #5ec98a;
+@action-siteswap-basics: #5ec98a;
 @action-tutorial: darken(@orb-picker, 20%);
 @action-show-me: @orb-pink;
 @action-try: @orb-bottom;
@@ -725,8 +725,8 @@ body.mode-game {
         .action-button-style(@action-controls);
     }
 
-    &[data-action="tutorial-siteswap-basic"] {
-        .action-button-style(@action-siteswap-basic);
+    &[data-action="tutorial-siteswap-basics"] {
+        .action-button-style(@action-siteswap-basics);
     }
 }
 
@@ -1013,7 +1013,7 @@ body.mode-game {
     text-align: center;
 }
 
-.credits-body {
+.app-modal-body {
     font-family: 'Asimovian', monospace;
     font-size: 14px;
     line-height: 1.55;

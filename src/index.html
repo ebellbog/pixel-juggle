@@ -76,7 +76,7 @@
                             </button>
                             <div class="picker-panel-button-row">
                                 <button type="button" class="action-button" data-action="tutorial-controls">Controls</button>
-                                <button type="button" class="action-button" data-action="tutorial-siteswap-basic">Siteswap basics</button>
+                                <button type="button" class="action-button" data-action="tutorial-siteswap-basics">Siteswap basics</button>
                             </div>
                         </div>
                     </div>
@@ -178,20 +178,11 @@
             </div>
         </div>
 
-        <!-- Credits modal - same chrome as #settings-overlay (see index.less). -->
-        <div id="credits-overlay" class="app-modal-overlay hidden">
-            <div id="credits-modal" class="app-modal">
-                <button id="credits-close-button" class="icon-button app-modal-close" title="Close">
-                    <span class="material-symbols-outlined" aria-hidden="true">close</span>
-                </button>
-                <h2 class="app-modal-title">Credits</h2>
-                <div class="credits-body">
-                    <p><strong>Pixel Juggle</strong></p>
-                    <p>Designed and developed by Elana Bell Bogdan, 2026.</p>
-                    <p>Placeholder — full credits coming soon.</p>
-                </div>
-            </div>
-        </div>
+        <!-- Credits/Controls/Siteswap basics/Leaderboard modals are rendered
+             here at startup from src/templates/*-modal.handlebars (see
+             App.renderContentModals) - each is a thin Handlebars partial
+             block "inheriting" the shared shell in
+             src/templates/partials/modal.handlebars. -->
     </div>
 </body>
 

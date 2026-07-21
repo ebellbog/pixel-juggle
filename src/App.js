@@ -7,6 +7,21 @@ import Soundtrack from './Soundtrack.js';
 import Settings from './Settings.js';
 import MenuOrbAnimation from './MenuOrbAnimation.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
+import creditsModalTemplate from './templates/credits-modal.handlebars';
+import controlsModalTemplate from './templates/controls-modal.handlebars';
+import siteswapBasicsModalTemplate from './templates/siteswap-basics-modal.handlebars';
+import leaderboardModalTemplate from './templates/leaderboard-modal.handlebars';
+
+// Rendered into #app on startup (see App.renderContentModals) - each is a
+// thin Handlebars partial block "inheriting" the shared shell in
+// src/templates/partials/modal.handlebars. Add future text-content modals
+// (not interactive ones like #settings-overlay) here.
+const CONTENT_MODAL_TEMPLATES = [
+    creditsModalTemplate,
+    controlsModalTemplate,
+    siteswapBasicsModalTemplate,
+    leaderboardModalTemplate,
+];
 
 const DEFAULT_BPM = 60;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
@@ -37,6 +52,10 @@ function waitMs(ms) {
  */
 export default class App {
     constructor() {
+        // Before anything below queries for #credits-overlay et al. - see
+        // CONTENT_MODAL_TEMPLATES.
+        this.renderContentModals();
+
         this.$body = $(document.body);
         this.$patternSelectWrap = $('#pattern-select-wrap');
         this.$patternPicker = document.getElementById('pattern-picker');
@@ -55,8 +74,7 @@ export default class App {
         this.$settingsOverlay = $('#settings-overlay');
         this.$settingsCloseButton = $('#settings-close-button');
         this.$settingsResetButton = $('#settings-reset-button');
-        this.$creditsOverlay = $('#credits-overlay');
-        this.$creditsCloseButton = $('#credits-close-button');
+        this.$contentModalOverlays = $('#credits-overlay, #controls-overlay, #siteswap-basics-overlay, #leaderboard-overlay');
         this.$creditsLink = $('#credits-link');
         this.$streakValue = $('#streak-value');
         this.$maxStreakValue = $('#max-streak-value');
@@ -113,6 +131,12 @@ export default class App {
         this.setPatternValue(this.patternValue);
         this.updateMuteButton();
         this.syncSettingsPanel();
+    }
+
+    /** Renders every CONTENT_MODAL_TEMPLATES entry into #app, once, at startup. */
+    renderContentModals() {
+        const html = CONTENT_MODAL_TEMPLATES.map((template) => template()).join('');
+        $('#app').append(html);
     }
 
     buildPatternSelect() {
@@ -257,7 +281,7 @@ export default class App {
             this.positionPatternSelectList();
         });
         this.bindSettingsEvents();
-        this.bindCreditsEvents();
+        this.bindContentModalEvents();
         // 'R' restarts an active demo/game from the keyboard, same as the
         // button (see restart()) - only while one is actually running, and
         // only when the siteswap input isn't focused, so it doesn't hijack
@@ -287,7 +311,7 @@ export default class App {
         });
         $(window).on('keydown', (event) => {
             if (event.key !== 'Escape') return;
-            if (!this.$creditsOverlay.hasClass('hidden')) this.closeCredits();
+            if (this.closeOpenContentModal()) return;
             else if (!this.$settingsOverlay.hasClass('hidden')) this.closeSettings();
             else if (this.pickerPanelId !== PICKER_PANELS[0]) this.setPickerPanel('main');
         });
@@ -314,12 +338,31 @@ export default class App {
         });
     }
 
-    bindCreditsEvents() {
-        this.$creditsLink.on('click', () => this.openCredits());
-        this.$creditsCloseButton.on('click', () => this.closeCredits());
-        this.$creditsOverlay.on('click', (event) => {
-            if (event.target === this.$creditsOverlay[0]) this.closeCredits();
+    bindContentModalEvents() {
+        this.$contentModalOverlays.each((_, overlay) => {
+            const $overlay = $(overlay);
+            $overlay.find('.app-modal-close').on('click', () => this.closeContentModal($overlay));
+            $overlay.on('click', (event) => {
+                if (event.target === overlay) this.closeContentModal($overlay);
+            });
         });
+        this.$creditsLink.on('click', () => this.openContentModal('credits-overlay'));
+    }
+
+    openContentModal(overlayId) {
+        $(`#${overlayId}`).removeClass('hidden');
+    }
+
+    closeContentModal($overlay) {
+        $overlay.addClass('hidden');
+    }
+
+    /** Closes whichever text-content modal is open, if any. Returns true if one was closed. */
+    closeOpenContentModal() {
+        const $open = this.$contentModalOverlays.not('.hidden').first();
+        if (!$open.length) return false;
+        this.closeContentModal($open);
+        return true;
     }
 
     openSettings() {
@@ -328,14 +371,6 @@ export default class App {
 
     closeSettings() {
         this.$settingsOverlay.addClass('hidden');
-    }
-
-    openCredits() {
-        this.$creditsOverlay.removeClass('hidden');
-    }
-
-    closeCredits() {
-        this.$creditsOverlay.addClass('hidden');
     }
 
     /**
@@ -449,16 +484,23 @@ export default class App {
             case 'tutorial':
                 this.setPickerPanel('tutorial');
                 break;
-            case 'compete':
-                // TODO: competitive/challenge mode.
-                break;
             case 'leaderboard':
-                // TODO: leaderboard screen.
+                this.openContentModal('leaderboard-overlay');
                 break;
             case 'difficulty-easier':
             case 'difficulty-normal':
             case 'difficulty-harder':
                 // TODO: start gameplay at the chosen difficulty.
+                console.log('Starting game at difficulty', action);
+                break;
+            case 'interactive-tutorial':
+                console.log('Starting interactive tutorial');
+                break;
+            case 'tutorial-controls':
+                this.openContentModal('controls-overlay');
+                break;
+            case 'tutorial-siteswap-basics':
+                this.openContentModal('siteswap-basics-overlay');
                 break;
             default:
                 break;

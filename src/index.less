@@ -969,7 +969,7 @@ body.mode-game {
 
 .app-modal {
     position: relative;
-    width: 430px;
+    width: 480px;
     max-width: calc(100vw - 48px);
     max-height: calc(100vh - 48px);
     overflow-y: auto;
@@ -1034,6 +1034,109 @@ body.mode-game {
     }
 }
 
+// Centered text-button sitting below a modal's main content (settings'
+// "Reset to defaults", the leaderboard's "Reset all scores") - shared so
+// any future modal footer action matches without redefining the spacing.
+.modal-footer-button {
+    display: block;
+    margin: 26px auto 0;
+}
+
+// --- Leaderboard modal (extends .app-modal-* above) ---------------------
+
+@leaderboard-table-max-height: 280px;
+
+.leaderboard-table-wrap {
+    max-height: @leaderboard-table-max-height;
+    overflow-y: auto;
+    // Hidden until the user hovers or focuses the list (keyboard scroll).
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+
+    &::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    &::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    &::-webkit-scrollbar-thumb {
+        background-color: transparent;
+        border-radius: 3px;
+    }
+
+    &:hover,
+    &:focus-within {
+        scrollbar-color: fade(@text, 28%) transparent;
+
+        &::-webkit-scrollbar-thumb {
+            background-color: fade(@text, 28%);
+        }
+    }
+
+    &:focus {
+        outline: none;
+    }
+
+    &:focus-visible {
+        outline: 1px solid fade(@text, 25%);
+        outline-offset: 2px;
+    }
+}
+
+.leaderboard-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-family: 'Turret Road', sans-serif;
+    font-size: 14px;
+
+    th,
+    td {
+        padding: 10px 6px;
+        text-align: left;
+
+        // Score is the only right-leaning value at a glance - keep it
+        // right-aligned like the numbers it is. :not([colspan]) excludes
+        // the "No scores yet" row's single spanning cell below, which
+        // would otherwise also match :last-child.
+        &:last-child:not([colspan]) {
+            text-align: right;
+        }
+    }
+
+    th {
+        .ui-label-style();
+        font-size: 13px;
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background-color: @bg;
+        // Thin underline under the header only - no column dividers
+        // anywhere, including here (see tbody tr below).
+        border-bottom: 1px solid fade(@text, 30%);
+    }
+
+    tbody tr:nth-child(odd) {
+        background-color: fade(white, 4%);
+    }
+
+    tbody tr:nth-child(even) {
+        background-color: fade(black, 12%);
+    }
+
+    // Nested (not a standalone top-level rule) so this beats the plain
+    // `td { text-align: left }` above on specificity - a bare
+    // .leaderboard-empty selector (one class) loses to `.leaderboard-table
+    // td` (one class + one element) regardless of source order.
+    .leaderboard-empty {
+        text-align: center;
+        color: fade(@text, 45%);
+        font-style: italic;
+    }
+}
+
 // --- Settings modal (extends .app-modal-* above) -----------------------
 
 .settings-group {
@@ -1074,11 +1177,6 @@ body.mode-game {
         color: @bg;
         font-weight: 700;
     }
-}
-
-#settings-reset-button {
-    display: block;
-    margin: 26px auto 0;
 }
 
 .text-button {

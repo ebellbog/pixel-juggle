@@ -11,17 +11,69 @@ import creditsModalTemplate from './templates/credits-modal.handlebars';
 import controlsModalTemplate from './templates/controls-modal.handlebars';
 import siteswapBasicsModalTemplate from './templates/siteswap-basics-modal.handlebars';
 import leaderboardModalTemplate from './templates/leaderboard-modal.handlebars';
+import leaderboardTableTemplate from './templates/partials/leaderboard-table.handlebars';
+
+// TODO: mock rows standing in for real score data - delete once
+// scores are actually collected/persisted somewhere (see handleMenuAction's
+// 'leaderboard' case).
+const MOCK_LEADERBOARD_SCORES = [
+    { player: 'Elana', pattern: '5 Ball Cascade', difficulty: 'Harder', score: 142 },
+    { player: 'Alex', pattern: '3 Ball Cascade', difficulty: 'Normal', score: 98 },
+    { player: 'Sam', pattern: '4 Ball Fountain', difficulty: 'Easier', score: 76 },
+    { player: 'Jordan', pattern: '531', difficulty: 'Harder', score: 61 },
+    { player: 'Riley', pattern: 'Box', difficulty: 'Normal', score: 40 },
+    { player: 'Morgan', pattern: 'Shower', difficulty: 'Harder', score: 120 },
+    { player: 'Taylor', pattern: 'Columns', difficulty: 'Easier', score: 83 },
+    { player: 'Casey', pattern: 'Half-Shower', difficulty: 'Normal', score: 95 },
+    { player: 'Jamie', pattern: '3 Ball Reverse Cascade', difficulty: 'Normal', score: 72 },
+    { player: 'Harper', pattern: 'Factory', difficulty: 'Harder', score: 109 },
+];
+
+// Lower sorts first - Harder > Normal > Easier (see sortLeaderboardScores).
+const LEADERBOARD_DIFFICULTY_ORDER = {
+    Harder: 0,
+    Normal: 1,
+    Easier: 2,
+};
+
+/** Sorts leaderboard rows: difficulty (harder first), pattern (A–Z), score (high–low). */
+function sortLeaderboardScores(scores) {
+    return [...scores].sort((a, b) => {
+        const diffA = LEADERBOARD_DIFFICULTY_ORDER[a.difficulty] ?? 99;
+        const diffB = LEADERBOARD_DIFFICULTY_ORDER[b.difficulty] ?? 99;
+        if (diffA !== diffB) return diffA - diffB;
+
+        const patternCmp = a.pattern.localeCompare(b.pattern, undefined, { sensitivity: 'base' });
+        if (patternCmp !== 0) return patternCmp;
+
+        return b.score - a.score;
+    });
+}
+
+function leaderboardModalData(scores) {
+    return { scores: sortLeaderboardScores(scores) };
+}
 
 // Rendered into #app on startup (see App.renderContentModals) - each is a
 // thin Handlebars partial block "inheriting" the shared shell in
 // src/templates/partials/modal.handlebars. Add future text-content modals
-// (not interactive ones like #settings-overlay) here.
+// (not interactive ones like #settings-overlay) here. Each entry is called
+// with no arguments except leaderboard's, which seeds its initial mock rows
+// (see CONTENT_MODAL_BODY_TEMPLATES for how it's *re*-rendered on reopen).
 const CONTENT_MODAL_TEMPLATES = [
     creditsModalTemplate,
     controlsModalTemplate,
     siteswapBasicsModalTemplate,
-    leaderboardModalTemplate,
+    () => leaderboardModalTemplate(leaderboardModalData(MOCK_LEADERBOARD_SCORES)),
 ];
+
+// overlayId -> template for modals whose *body* needs re-rendering with
+// fresh data every time they're reopened (see App.openContentModal), rather
+// than only ever being rendered once at startup like the plain entries in
+// CONTENT_MODAL_TEMPLATES above.
+const CONTENT_MODAL_BODY_TEMPLATES = {
+    'leaderboard-overlay': leaderboardTableTemplate,
+};
 
 const DEFAULT_BPM = 60;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
@@ -349,7 +401,23 @@ export default class App {
         this.$creditsLink.on('click', () => this.openContentModal('credits-overlay'));
     }
 
-    openContentModal(overlayId) {
+    /**
+     * Opens a text-content modal. If `data` is passed and the overlay has a
+     * matching entry in CONTENT_MODAL_BODY_TEMPLATES, its .app-modal-body is
+     * re-rendered with that data first - e.g. the leaderboard passing fresh
+     * `{ scores }` each time it's reopened, rather than only ever showing
+     * whatever it was first rendered with at startup (see
+     * CONTENT_MODAL_TEMPLATES). Modals with no such entry (credits,
+     * controls, siteswap-basics) just ignore `data` and show as-is.
+     */
+    openContentModal(overlayId, data) {
+        const bodyTemplate = CONTENT_MODAL_BODY_TEMPLATES[overlayId];
+        if (bodyTemplate && data) {
+            const renderData = overlayId === 'leaderboard-overlay'
+                ? leaderboardModalData(data.scores || [])
+                : data;
+            $(`#${overlayId} .app-modal-body`).html(bodyTemplate(renderData));
+        }
         $(`#${overlayId}`).removeClass('hidden');
     }
 
@@ -485,7 +553,9 @@ export default class App {
                 this.setPickerPanel('tutorial');
                 break;
             case 'leaderboard':
-                this.openContentModal('leaderboard-overlay');
+                // TODO: pass real scores once they're actually collected/
+                // persisted somewhere, rather than the MOCK_LEADERBOARD_SCORES stand-in.
+                this.openContentModal('leaderboard-overlay', { scores: MOCK_LEADERBOARD_SCORES });
                 break;
             case 'difficulty-easier':
             case 'difficulty-normal':

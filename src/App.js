@@ -12,8 +12,12 @@ const DEFAULT_BPM = 60;
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 // Keep in sync with @screen-fade-duration in index.less.
 const SCREEN_FADE_MS = 550;
-// Keep in sync with @picker-panel-fade-duration in index.less.
-const PICKER_PANEL_FADE_MS = 300;
+// Keep in sync with @picker-panel-slide-duration in index.less.
+const PICKER_PANEL_SLIDE_MS = 350;
+
+// Ordered left-to-right on #picker-panels-track (main first, sub-menus after).
+// Add future sub-menus here and as another .picker-panel sibling in index.html.
+const PICKER_PANELS = ['main', 'difficulty'];
 
 function waitMs(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -33,9 +37,8 @@ export default class App {
         this.$body = $(document.body);
         this.$patternSelectWrap = $('#pattern-select-wrap');
         this.$patternPicker = document.getElementById('pattern-picker');
-        this.$pickerMainPanel = $('#picker-main-panel');
-        this.$pickerDifficultyPanel = $('#picker-difficulty-panel');
-        this.$difficultyBackButton = $('#difficulty-back-button');
+        this.$pickerPanelsTrack = $('#picker-panels-track');
+        this.$pickerBackButton = $('#picker-back-button');
         this.$patternSelectTrigger = $('#pattern-select-trigger');
         this.$patternSelectList = $('#pattern-select-list');
         this.$customInputWrap = $('#custom-input-wrap');
@@ -95,14 +98,12 @@ export default class App {
         // rather than going ahead and starting a second simulator/game on
         // top of whatever's now actually current.
         this.startToken = 0;
-        // Bumped on every showDifficultyPanel() call - lets a fade-in
-        // that's still pending (see there) recognize it's been superseded
-        // by a newer call before its timeout fires.
-        this.difficultyFadeToken = 0;
+        this.pickerPanelId = PICKER_PANELS[0];
         this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
         this.patternValue = PATTERN_GROUPS[0].patterns[0].value;
 
         this.buildPatternSelect();
+        this.initPickerPanels();
         this.bindEvents();
         this.setMode('menu');
         this.handleResize();
@@ -164,13 +165,23 @@ export default class App {
         this.$patternSelectWrap.toggleClass('open', open);
         this.$patternSelectTrigger.attr('aria-expanded', open ? 'true' : 'false');
 
-        // Otherwise, reopening after scrolling down to a lower option leaves
-        // the list scrolled to that spot, which can push the top options
-        // out of view (and out of easy reach) until the user scrolls back up.
         if (open) {
+            this.positionPatternSelectList();
             const selected = this.$patternSelectList.find('.pattern-select-option.selected')[0];
             (selected || this.$patternSelectList[0]).scrollIntoView({ block: 'nearest' });
         }
+    }
+
+    /** Keeps the portaled #pattern-select-list aligned under its trigger. */
+    positionPatternSelectList() {
+        if (this.$patternSelectList.hasClass('hidden')) return;
+
+        const rect = this.$patternSelectTrigger[0].getBoundingClientRect();
+        this.$patternSelectList.css({
+            top: rect.bottom,
+            left: rect.left,
+            width: rect.width,
+        });
     }
 
     setPatternValue(value) {
@@ -230,7 +241,7 @@ export default class App {
             if ($button.prop('disabled')) return;
             this.handleMenuAction($button.attr('data-action'));
         });
-        this.$difficultyBackButton.on('click', () => this.showDifficultyPanel(false));
+        this.$pickerBackButton.on('click', () => this.setPickerPanel('main'));
         this.$stopButton.on('click', () => this.stop());
         this.$restartButton.on('click', () => this.restart());
         this.$muteButton.on('click', () => {
@@ -238,7 +249,10 @@ export default class App {
             this.updateMuteButton();
         });
         this.$bpmSlider.on('input', () => this.setBpm(Number(this.$bpmSlider.val())));
-        $(window).on('resize', () => this.handleResize());
+        $(window).on('resize', () => {
+            this.handleResize();
+            this.positionPatternSelectList();
+        });
         this.bindSettingsEvents();
         this.bindCreditsEvents();
         // 'R' restarts an active demo/game from the keyboard, same as the
@@ -272,7 +286,7 @@ export default class App {
             if (event.key !== 'Escape') return;
             if (!this.$creditsOverlay.hasClass('hidden')) this.closeCredits();
             else if (!this.$settingsOverlay.hasClass('hidden')) this.closeSettings();
-            else if (!this.$pickerDifficultyPanel.hasClass('picker-panel-hidden')) this.showDifficultyPanel(false);
+            else if (this.pickerPanelId !== PICKER_PANELS[0]) this.setPickerPanel('main');
         });
 
         this.$settingsOverlay.find('.settings-option-row').on('click', '.settings-option', (event) => {
@@ -374,18 +388,18 @@ export default class App {
         this.$muteButton.attr('title', muted ? 'Unmute' : 'Mute');
     }
 
-    /** Swaps between the menu/demo/game screens - see index.less for what each body class actually shows/hides. */
+    /** Swaps between the menu/demo/game screens - see index.less for what each body class actually shows/hides. Pass null for a blank body (everything hidden) between staged transitions. */
     setMode(mode) {
         const leavingMenu = this.mode === 'menu' && mode !== 'menu';
         this.mode = mode;
-        this.$body.attr('class', `mode-${mode}`);
+        this.$body.attr('class', mode ? `mode-${mode}` : '');
         if (mode === 'menu') {
             this.menuOrbAnimation.start();
         } else if (leavingMenu) {
             // Keep orbs moving through the title-screen fade rather than
             // snapping to their t = 0 pose the instant the mode flips.
             this.menuOrbAnimation.stopAfter(SCREEN_FADE_MS);
-        } else {
+        } else if (mode) {
             this.menuOrbAnimation.stop();
         }
     }
@@ -423,10 +437,8 @@ export default class App {
                 this.startDemo();
                 break;
             case 'try':
-                // "Juggle" no longer starts gameplay directly - it opens the
-                // difficulty pick instead (see showDifficultyPanel). Practice
-                // is the only one of its options that actually starts a game.
-                this.showDifficultyPanel(true);
+                // "Juggle" opens the difficulty sub-menu (see setPickerPanel).
+                this.setPickerPanel('difficulty');
                 break;
             case 'practice':
                 this.startGame();
@@ -450,23 +462,45 @@ export default class App {
         }
     }
 
-    /**
-     * Swaps #picker-main-panel and #picker-difficulty-panel in place within
-     * the orb (see .picker-panel in index.less) - fading the outgoing panel
-     * all the way out before fading the incoming one in, rather than
-     * cross-dissolving between them. Also the "back to menu" target for
-     * #difficulty-back-button.
-     */
-    showDifficultyPanel(show) {
-        const $from = show ? this.$pickerMainPanel : this.$pickerDifficultyPanel;
-        const $to = show ? this.$pickerDifficultyPanel : this.$pickerMainPanel;
-        const token = ++this.difficultyFadeToken;
+    /** Sets up the horizontal picker track (see #picker-panels-* in index.less). */
+    initPickerPanels() {
+        this.$patternPicker.style.setProperty('--picker-panel-count', PICKER_PANELS.length);
+        this.setPickerPanel(PICKER_PANELS[0], { instant: true });
+    }
 
-        $from.addClass('picker-panel-hidden');
-        setTimeout(() => {
-            if (token !== this.difficultyFadeToken) return; // Superseded by a newer call before we settled.
-            $to.removeClass('picker-panel-hidden');
-        }, PICKER_PANEL_FADE_MS);
+    /**
+     * Slides #picker-panels-track to the named panel. Main is leftmost;
+     * sub-menus sit to its right and slide in when selected.
+     * #picker-back-button stays fixed on the viewport and fades in for any sub-menu.
+     */
+    setPickerPanel(panelId, { instant = false } = {}) {
+        const index = PICKER_PANELS.indexOf(panelId);
+        if (index < 0) return;
+
+        if (panelId !== PICKER_PANELS[0]) this.setPatternListOpen(false);
+
+        this.pickerPanelId = panelId;
+        const onSubMenu = panelId !== PICKER_PANELS[0];
+        const track = this.$pickerPanelsTrack[0];
+        const backButton = this.$pickerBackButton[0];
+        if (instant) {
+            track.style.transition = 'none';
+            backButton.style.transition = 'none';
+        }
+        this.$patternPicker.style.setProperty('--picker-panel-index', index);
+        this.$patternPicker.setAttribute('data-picker-panel', panelId);
+        this.$pickerBackButton.toggleClass('visible', onSubMenu);
+        this.$pickerBackButton.attr('aria-hidden', onSubMenu ? 'false' : 'true');
+        this.$pickerPanelsTrack.find('.picker-panel').each((_, panel) => {
+            const isActive = panel.getAttribute('data-picker-panel') === panelId;
+            panel.setAttribute('aria-hidden', isActive ? 'false' : 'true');
+        });
+        if (instant) {
+            // Force reflow so the next slide/fade still animates.
+            track.offsetHeight;
+            track.style.transition = '';
+            backButton.style.transition = '';
+        }
     }
 
     validate() {
@@ -522,7 +556,7 @@ export default class App {
     /** "Show me" - the fully automatic demo animation (previous behavior). */
     startDemo() {
         if (!this.siteswap || !this.siteswap.isValid) return;
-        this.stop();
+        this.stop({ animated: false });
 
         // #canvas-area is opacity-hidden on the menu screen, so setMode has
         // to run before resize() measures it, or it'd measure a zero-size box.
@@ -611,19 +645,23 @@ export default class App {
     /** "Let me try!" - hands off to Game for everything from here on. */
     startGame() {
         if (!this.siteswap || !this.siteswap.isValid) return;
-        this.stop();
+        this.clearSession();
 
-        // See the matching comment in startDemo() - the canvas needs to be
-        // visible before anything measures it.
-        this.setMode('game');
-        this.renderer.resize();
+        // Staged transition: fade the title screen out on its own (still
+        // showing whichever sub-menu was open), reset the picker once it's
+        // invisible, then fade gameplay in - no menu/game cross-dissolve.
+        const startToken = this.startToken;
+        this.setMode(null);
+        waitMs(SCREEN_FADE_MS).then(() => {
+            if (startToken !== this.startToken) return;
 
-        // See the matching comment in startDemo() re: waiting for resume()
-        // to actually settle before anything can schedule sound.
-        const startToken = ++this.startToken;
-        this.soundtrack.resume().then(() => {
-            if (startToken !== this.startToken) return; // Superseded by a newer start/stop before resume() settled.
+            this.setPickerPanel(PICKER_PANELS[0], { instant: true });
+            this.setMode('game');
+            this.renderer.resize();
 
+            // Start drawing immediately as the canvas fades in, rather than
+            // waiting for the fade to finish (which left a blank screen that
+            // suddenly popped into gameplay).
             this.game = new Game(this.siteswap, {
                 bpm: this.bpm,
                 renderer: this.renderer,
@@ -635,6 +673,8 @@ export default class App {
                 settings: this.settings,
             });
             this.game.start();
+
+            return this.soundtrack.resume();
         });
     }
 
@@ -665,10 +705,10 @@ export default class App {
         }
     }
 
-    stop() {
-        // Invalidates any startDemo/startGame still waiting on
-        // soundtrack.resume() (see there) - e.g. the stop button clicked
-        // before resume() has settled.
+    /** Tears down any running demo/game and clears audio/canvas, without changing menu mode or picker state. */
+    clearSession() {
+        // Invalidates any startDemo/startGame still waiting on a transition
+        // or soundtrack.resume() (see there).
         this.startToken++;
         if (this.rafId !== null) {
             cancelAnimationFrame(this.rafId);
@@ -681,9 +721,30 @@ export default class App {
         }
         this.soundtrack.stopAll();
         this.renderer.draw({ balls: [] });
-        this.setMode('menu');
-        // Land back on the pattern pick, not wherever the difficulty panel
-        // happened to be left (e.g. stopping mid-game via Practice).
-        this.showDifficultyPanel(false);
+    }
+
+    stop({ animated = true } = {}) {
+        const leavingActiveScreen = this.mode === 'game' || this.mode === 'demo';
+
+        if (!animated || !leavingActiveScreen) {
+            this.clearSession();
+            this.setMode('menu');
+            this.setPickerPanel(PICKER_PANELS[0], { instant: true });
+            return;
+        }
+
+        // Staged transition (mirror of startGame): fade gameplay out on its
+        // own while the sim/game keeps drawing, tear down once invisible,
+        // reset the picker, then fade the menu in.
+        const stopToken = this.startToken;
+        this.setMode(null);
+
+        waitMs(SCREEN_FADE_MS).then(() => {
+            if (stopToken !== this.startToken) return;
+
+            this.clearSession();
+            this.setPickerPanel(PICKER_PANELS[0], { instant: true });
+            this.setMode('menu');
+        });
     }
 }

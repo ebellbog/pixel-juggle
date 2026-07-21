@@ -31,19 +31,17 @@
     }
 }
 
-// #picker-main-panel/#picker-difficulty-panel (see App.showDifficultyPanel)
-// fade to black then back in, rather than cross-dissolving - App.js
-// sequences the two panels' class toggles half a beat apart, so each half
-// just needs its own one-way fade. Keep in sync with PICKER_PANEL_FADE_MS.
-@picker-panel-fade-duration: 0.3s;
+// #picker-panels-track (see App.setPickerPanel) slides horizontally between
+// .picker-panel columns; overflow is clipped by #picker-panels-viewport.
+// Keep in sync with PICKER_PANEL_SLIDE_MS.
+@picker-panel-slide-duration: 0.6s;
 
-.picker-panel-transition() {
-    transition: opacity @picker-panel-fade-duration ease,
-        visibility @picker-panel-fade-duration ease;
+.picker-panel-slide-transition() {
+    transition: transform @picker-panel-slide-duration ease;
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .picker-panel-transition() {
+    .picker-panel-slide-transition() {
         transition: none;
     }
 }
@@ -128,7 +126,9 @@ body {
 
 // Which screen (menu vs juggling) is showing is driven by one body class
 // (see App.setMode). Opacity/visibility crossfade rather than display
-// toggling so entering/leaving demo or game can animate smoothly.
+// toggling so entering/leaving demo or game can animate smoothly. A blank
+// body (no mode-* class) hides everything between staged transitions, e.g.
+// menu→game via Practice and game→menu via Stop (see App.startGame/stop).
 #title-screen {
     position: absolute;
     inset: 0;
@@ -154,8 +154,7 @@ body {
     .screen-layer-transition();
 }
 
-#game-controls,
-#settings-button {
+#game-controls {
     opacity: 0;
     visibility: hidden;
     pointer-events: none;
@@ -174,12 +173,6 @@ body.mode-menu {
         visibility: visible;
         pointer-events: auto;
     }
-
-    #settings-button {
-        opacity: 1;
-        visibility: visible;
-        pointer-events: auto;
-    }
 }
 
 body.mode-demo,
@@ -191,12 +184,6 @@ body.mode-game {
     }
 
     #game-controls {
-        opacity: 1;
-        visibility: visible;
-        pointer-events: auto;
-    }
-
-    #settings-button {
         opacity: 1;
         visibility: visible;
         pointer-events: auto;
@@ -230,12 +217,8 @@ body.mode-game {
 }
 
 // Centered on the title screen. Three decorative orbs (.menu-orb) follow a
-// two-link hinged path driven by MenuOrbAnimation.js. The purple disc sits
-// between the orbs and the controls via .pattern-picker-disc. Content is
-// split into two overlapping .picker-panel layers (pattern pick + top-level
-// actions, and the difficulty pick shown after "Juggle" - see
-// App.showDifficultyPanel) that crossfade in place rather than resizing
-// the orb.
+// two-link hinged path driven by MenuOrbAnimation.js. Menu content slides
+// horizontally inside #picker-panels-viewport (see App.setPickerPanel).
 #pattern-picker {
     position: absolute;
     top: 50%;
@@ -245,6 +228,9 @@ body.mode-game {
     height: 380px;
     box-sizing: border-box;
     text-align: center;
+    // Slide index/count for #picker-panels-track (see App.setPickerPanel).
+    --picker-panel-count: 1;
+    --picker-panel-index: 0;
 
     .menu-orb {
         position: absolute;
@@ -289,22 +275,65 @@ body.mode-game {
         background-size: 14px 14px;
     }
 
-    .pattern-picker-disc {
-        position: absolute;
-        inset: 0;
-        border-radius: 50%;
-        background-color: @bg;
-        border: 1px solid white;
-        pointer-events: none;
-        z-index: 1;
-    }
+}
 
+// Central disc: background, white ring, and circular clip for the sliding
+// menu panels (see #picker-panels-track). Sits above the decorative orbs.
+#picker-panels-viewport {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background-color: @bg;
+    border: 1px solid white;
+    overflow: hidden;
+    z-index: 2;
+}
+
+// Fixed over the sliding track; fades in on any sub-menu (see App.setPickerPanel).
+#picker-back-button {
+    position: absolute;
+    top: 20%;
+    left: 15%;
+    transform: translateX(-50%);
+    z-index: 3;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.35s ease, visibility 0.35s ease;
+
+    &.visible {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transition-delay: .35s;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #picker-back-button {
+        transition: none;
+    }
+}
+
+// App.js sets --picker-panel-index and --picker-panel-count to slide the
+// active column into view. Track and panel widths are both derived from
+// --picker-panel-count so each column is exactly one viewport wide (a bare
+// flex: 0 0 100% on the panels would leave the track indefinite and the
+// browser splits the viewport 50/50).
+#picker-panels-track {
+    position: relative;
+    z-index: 0;
+    display: flex;
+    height: 100%;
+    width: calc(100% * var(--picker-panel-count, 1));
+    .picker-panel-slide-transition();
+    transform: translateX(calc(-100% * var(--picker-panel-index, 0) / var(--picker-panel-count, 1)));
 }
 
 .picker-panel {
-    position: absolute;
-    inset: 0;
-    z-index: 2;
+    position: relative;
+    flex: 0 0 calc(100% / var(--picker-panel-count, 1));
+    height: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -312,16 +341,6 @@ body.mode-game {
     gap: 14px;
     padding: 0 40px;
     box-sizing: border-box;
-    .picker-panel-transition();
-
-    // Distinct from the shared .hidden utility (display: none), which would
-    // block the fade entirely - see body.mode-menu et al. for the same
-    // pattern at the whole-screen level.
-    &.picker-panel-hidden {
-        opacity: 0;
-        visibility: hidden;
-        pointer-events: none;
-    }
 }
 
 #pattern-select-wrap {
@@ -330,7 +349,8 @@ body.mode-game {
     z-index: 2;
 
     // Siblings (custom input, buttons) share z-index 2 and paint later in
-    // DOM order, so the list needs the whole wrap lifted while it's open.
+    // DOM order; lift the trigger while open so it stays above them. The
+    // list itself is portaled outside the viewport (see index.html).
     &.open {
         z-index: 10;
     }
@@ -430,14 +450,13 @@ body.mode-game {
 }
 
 .pattern-select-list {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
+    position: fixed;
+    z-index: 20;
     margin: 0;
     padding: 4px 0;
     list-style: none;
-    border: 1px solid white;//#3a3a52;
+    box-sizing: border-box;
+    border: 1px solid white;
     border-top: none;
     border-radius: 0 0 @border-radius-small @border-radius-small;
     background-color: fade(#0e0e18, 60%);
@@ -445,7 +464,6 @@ body.mode-game {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
     max-height: 280px;
     overflow-y: auto;
-    z-index: 1;
 }
 
 .pattern-select-divider {
@@ -539,16 +557,6 @@ body.mode-game {
     //     justify-self: center;
     //     width: 50%;
     // }
-}
-
-// Difficulty pick shown in #picker-difficulty-panel after "Juggle" (see
-// App.showDifficultyPanel). Back arrow sits above the option rows, pinned to
-// the panel's own top-left corner rather than taking up flex flow space.
-#difficulty-back-button {
-    position: absolute;
-    top: 20%;
-    left: 15%;
-    transform: translateX(-50%);
 }
 
 #difficulty-select {
@@ -824,6 +832,7 @@ body.mode-game {
     top: 14px;
     left: 22px;
     z-index: 10;
+    // Always visible in every mode, including blank-body transitions.
 }
 
 // Stop, restart, and mute - the only chrome shown once a demo or game is

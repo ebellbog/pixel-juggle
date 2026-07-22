@@ -158,6 +158,33 @@ export default class Game {
         this.ballRadius = this.physics.ballRadius;
         this.extent = this.buildExtent();
 
+        // How many correct throws in a row count as fully "back in the
+        // groove" (see recordThrowSequenceOutcome/startGrooveCountdown) -
+        // one full lap of the *notation's* own period (siteswap.period),
+        // which isn't always this.paths.length. Siteswap.toSchedule()
+        // doubles an odd-period vanilla pattern's schedule (this.period)
+        // to keep true R/L alternation correct (see the comment there),
+        // so e.g. 531's this.paths has 6 entries even though its throw
+        // heights/crossings only actually repeat every 3 - one lap
+        // starting on the right hand, one on the left. Dividing
+        // paths.length by that same doubling factor recovers the
+        // notation's real per-lap throw count either way, so landing
+        // three (not six) 531 throws in a row - starting with whichever
+        // hand - reads as clean, same as it would to an actual juggler.
+        // Sync patterns and even-period vanilla ones never double
+        // (this.period === siteswap.period already), so this comes out
+        // to plain this.paths.length for them, same as before.
+        this.groovePeriodThrows = this.paths.length / (this.period / siteswap.period);
+        // How many this.throwSequenceSteps positions forward lands on
+        // this same doubling's *other* phase - identical crossing/height
+        // sequence, opposite lead hand (e.g. 531's R5-L3-R1 vs. its
+        // L5-R3-L1). 0 for sync/even-period vanilla patterns, which never
+        // double in the first place and so only ever have the one phase.
+        // recordThrowSequenceOutcome uses this to let a recovery attempt
+        // lead with either hand, rather than only whichever one this
+        // pointer happened to freeze on when the preceding mismatch hit.
+        this.recoveryPhaseShift = this.groovePeriodThrows === this.paths.length ? 0 : this.groovePeriodThrows;
+
         // this.paths grouped by beat, so a synchronous pattern's beat-pairs
         // (both hands throwing at once - see SyncSiteswap) are tracked and
         // highlighted as one atomic step rather than two throws in a row.
@@ -216,7 +243,8 @@ export default class Game {
         // exactly one.
         this.throwSequencePending = new Set(this.throwSequenceSteps[0].entries.map((entry) => entry.hand));
         // Consecutive correct throws since the last mismatch - highlighting
-        // resumes once this reaches a full period (this.paths.length).
+        // resumes once this reaches a full notation-period lap (see
+        // this.groovePeriodThrows).
         this.throwSequenceStreak = 0;
         // True once a mismatch (a wrong throw, or an attempt that failed
         // outright) has hidden the ghost highlight; cleared only by a full
@@ -688,6 +716,17 @@ export default class Game {
      * the initial highlight just keeps waiting for them to get to it, rather
      * than hiding before they've had a real chance to start.
      *
+     * While recovering (throwSequenceHidden) from a doubled, odd-period
+     * pattern (see recoveryPhaseShift), a throw that doesn't match this
+     * frozen step but does match its other-phase mirror - same crossing/
+     * height, opposite hand - re-syncs the pointer onto that mirror
+     * instead of counting as yet another mismatch. Without this, recovery
+     * would only ever accept whichever hand this pointer happened to
+     * freeze on, silently wasting every attempt led with the other one
+     * until the player's own rhythm happened to land back on it - rather
+     * than the three (not six) clean 531 throws groovePeriodThrows
+     * promises, "starting with either hand."
+     *
      * Also drives the soundtrack's chord progression (see
      * soundtrackSuccessCount/Soundtrack.advancePeriod): every match nudges
      * it toward the next chord, and every real mismatch snaps it straight
@@ -696,16 +735,33 @@ export default class Game {
      * reset anything that hasn't started progressing yet.
      */
     recordThrowSequenceOutcome(hand, crossing, height) {
-        const step = this.throwSequenceSteps[this.throwSequenceIndex];
-        const expected = hand !== null ? step.entries.find((entry) => entry.hand === hand) : null;
-        const matched = expected
-            && this.throwSequencePending.has(hand)
+        let stepIndex = this.throwSequenceIndex;
+        let step = this.throwSequenceSteps[stepIndex];
+        let pending = this.throwSequencePending;
+        let expected = hand !== null ? step.entries.find((entry) => entry.hand === hand) : null;
+        let matched = expected
+            && pending.has(hand)
             && expected.crossing === crossing
             && expected.height === height;
 
+        if (!matched && hand !== null && this.throwSequenceHidden && this.recoveryPhaseShift) {
+            const mirrorIndex = (stepIndex + this.recoveryPhaseShift) % this.throwSequenceSteps.length;
+            const mirrorStep = this.throwSequenceSteps[mirrorIndex];
+            const mirrorExpected = mirrorStep.entries.find((entry) => entry.hand === hand);
+            if (mirrorExpected && mirrorExpected.crossing === crossing && mirrorExpected.height === height) {
+                stepIndex = mirrorIndex;
+                step = mirrorStep;
+                pending = new Set(step.entries.map((entry) => entry.hand));
+                expected = mirrorExpected;
+                matched = true;
+            }
+        }
+
         if (matched) {
+            this.throwSequenceIndex = stepIndex;
             this.throwSequenceStarted = true;
-            this.throwSequencePending.delete(hand);
+            pending.delete(hand);
+            this.throwSequencePending = pending;
             this.throwSequenceStreak += 1;
             if (this.throwSequenceStreak > this.maxStreak) {
                 this.maxStreak = this.throwSequenceStreak;
@@ -717,7 +773,7 @@ export default class Game {
             // its own mode check beyond this one line.
             if (this.isCompetitive) this.score += 1;
             this.updateStatsDisplay();
-            if (this.throwSequenceStreak >= this.paths.length) {
+            if (this.throwSequenceStreak >= this.groovePeriodThrows) {
                 this.throwSequenceHidden = false;
                 // Ghost highlight is back on - the player's "back in the
                 // groove" (see class doc/startGrooveCountdown), so whatever

@@ -5,6 +5,8 @@ import Renderer from './Renderer.js';
 import Game from './Game.js';
 import Soundtrack from './Soundtrack.js';
 import Settings from './Settings.js';
+import Scores from './Scores.js';
+import PatternSelection from './PatternSelection.js';
 import MenuOrbAnimation from './MenuOrbAnimation.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 import creditsModalTemplate from './templates/credits-modal.handlebars';
@@ -12,22 +14,8 @@ import controlsModalTemplate from './templates/controls-modal.handlebars';
 import siteswapBasicsModalTemplate from './templates/siteswap-basics-modal.handlebars';
 import leaderboardModalTemplate from './templates/leaderboard-modal.handlebars';
 import leaderboardTableTemplate from './templates/partials/leaderboard-table.handlebars';
-
-// TODO: mock rows standing in for real score data - delete once
-// scores are actually collected/persisted somewhere (see handleMenuAction's
-// 'leaderboard' case).
-const MOCK_LEADERBOARD_SCORES = [
-    { player: 'Elana', pattern: '5 Ball Cascade', difficulty: 'Harder', score: 142 },
-    { player: 'Alex', pattern: '3 Ball Cascade', difficulty: 'Normal', score: 98 },
-    { player: 'Sam', pattern: '4 Ball Fountain', difficulty: 'Easier', score: 76 },
-    { player: 'Jordan', pattern: '531', difficulty: 'Harder', score: 61 },
-    { player: 'Riley', pattern: 'Box', difficulty: 'Normal', score: 40 },
-    { player: 'Morgan', pattern: 'Shower', difficulty: 'Harder', score: 120 },
-    { player: 'Taylor', pattern: 'Columns', difficulty: 'Easier', score: 83 },
-    { player: 'Casey', pattern: 'Half-Shower', difficulty: 'Normal', score: 95 },
-    { player: 'Jamie', pattern: '3 Ball Reverse Cascade', difficulty: 'Normal', score: 72 },
-    { player: 'Harper', pattern: 'Factory', difficulty: 'Harder', score: 109 },
-];
+import gameOverModalTemplate from './templates/game-over-modal.handlebars';
+import gameOverBodyTemplate from './templates/partials/game-over-body.handlebars';
 
 // Lower sorts first - Harder > Normal > Easier (see sortLeaderboardScores).
 const LEADERBOARD_DIFFICULTY_ORDER = {
@@ -36,7 +24,7 @@ const LEADERBOARD_DIFFICULTY_ORDER = {
     Easier: 2,
 };
 
-/** Sorts leaderboard rows: difficulty (harder first), pattern (A–Z), score (high–low). */
+/** Sorts score rows: difficulty (harder first), pattern (A–Z), score (high–low). */
 function sortLeaderboardScores(scores) {
     return [...scores].sort((a, b) => {
         const diffA = LEADERBOARD_DIFFICULTY_ORDER[a.difficulty] ?? 99;
@@ -50,21 +38,41 @@ function sortLeaderboardScores(scores) {
     });
 }
 
-function leaderboardModalData(scores) {
-    return { scores: sortLeaderboardScores(scores) };
+/**
+ * Sorts `scores` and, if `highlightId` matches one of them, tags that entry
+ * with `highlighted: true` for the score-table partial to mark (see
+ * .leaderboard-row-highlight in index.less) - used both by the Scores modal
+ * (never highlights anything) and the Game Over modal (highlights the run
+ * that was just saved - see saveGameOverScore).
+ */
+function buildScoreTableData(scores, { highlightId = null } = {}) {
+    return sortLeaderboardScores(scores).map((entry) => (
+        highlightId != null && entry.id === highlightId
+            ? { ...entry, highlighted: true }
+            : entry
+    ));
 }
+
+// Which content-modal overlays render the shared score table (see
+// score-table.handlebars) - openContentModal sorts/highlights `data.scores`
+// for these before handing off to their body template, rather than every
+// other content modal's plain pass-through (see there).
+const SCORE_TABLE_OVERLAYS = new Set(['leaderboard-overlay', 'game-over-overlay']);
 
 // Rendered into #app on startup (see App.renderContentModals) - each is a
 // thin Handlebars partial block "inheriting" the shared shell in
 // src/templates/partials/modal.handlebars. Add future text-content modals
 // (not interactive ones like #settings-overlay) here. Each entry is called
-// with no arguments except leaderboard's, which seeds its initial mock rows
-// (see CONTENT_MODAL_BODY_TEMPLATES for how it's *re*-rendered on reopen).
+// with no arguments; the score-table ones' initial (empty) render is never
+// actually seen since both overlays start with the .hidden class and
+// openContentModal always re-renders their body with real data before
+// revealing them (see CONTENT_MODAL_BODY_TEMPLATES).
 const CONTENT_MODAL_TEMPLATES = [
     creditsModalTemplate,
     controlsModalTemplate,
     siteswapBasicsModalTemplate,
-    () => leaderboardModalTemplate(leaderboardModalData(MOCK_LEADERBOARD_SCORES)),
+    () => leaderboardModalTemplate({ scores: [] }),
+    () => gameOverModalTemplate({ scores: [], pendingScore: null }),
 ];
 
 // overlayId -> template for modals whose *body* needs re-rendering with
@@ -73,6 +81,19 @@ const CONTENT_MODAL_TEMPLATES = [
 // CONTENT_MODAL_TEMPLATES above.
 const CONTENT_MODAL_BODY_TEMPLATES = {
     'leaderboard-overlay': leaderboardTableTemplate,
+    'game-over-overlay': gameOverBodyTemplate,
+};
+
+// Competitive mode's per-difficulty tuning (see Game's constructor/
+// recordThrowSequenceOutcome) - starting tempo, and how much BPM ramps up
+// after each full progression through the chord pattern. `label` doubles as
+// the "Difficulty" column value saved with a run's score (see
+// handleGameOver/Scores.js), so it has to match LEADERBOARD_DIFFICULTY_ORDER's
+// keys above.
+const DIFFICULTY_CONFIG = {
+    easier: { label: 'Easier', startBpm: 45, bpmIncrement: 3 },
+    normal: { label: 'Normal', startBpm: 60, bpmIncrement: 5 },
+    harder: { label: 'Harder', startBpm: 75, bpmIncrement: 7 },
 };
 
 const DEFAULT_BPM = 60;
@@ -126,10 +147,13 @@ export default class App {
         this.$settingsOverlay = $('#settings-overlay');
         this.$settingsCloseButton = $('#settings-close-button');
         this.$settingsResetButton = $('#settings-reset-button');
-        this.$contentModalOverlays = $('#credits-overlay, #controls-overlay, #siteswap-basics-overlay, #leaderboard-overlay');
+        this.$contentModalOverlays = $('#credits-overlay, #controls-overlay, #siteswap-basics-overlay, #leaderboard-overlay, #game-over-overlay');
         this.$creditsLink = $('#credits-link');
         this.$streakValue = $('#streak-value');
         this.$maxStreakValue = $('#max-streak-value');
+        this.$scoreValue = $('#score-value');
+        this.$grooveCountdown = $('#groove-countdown');
+        this.$grooveCountdownValue = $('#groove-countdown-value');
         this.$validationIcon = $('#validation-icon');
         this.$bpmSlider = $('#bpm-slider');
         this.$bpmValue = $('#bpm-value');
@@ -142,6 +166,11 @@ export default class App {
         // (inputType), which each just read the live value straight off it
         // rather than needing a change notification (see there).
         this.settings = new Settings();
+        // Competitive mode's score history (see Scores.js/handleGameOver) -
+        // same read/write-through-localStorage shape as Settings above.
+        this.scores = new Scores();
+        // Title-screen pattern picker (see PatternSelection.js).
+        this.patternSelection = new PatternSelection();
         this.renderer = new Renderer(this.canvas, { settings: this.settings });
         // Device/browser can't run the real fluid sim at all (see
         // FluidSimulation.tryCreate/Renderer.fluid) - hide the option
@@ -173,7 +202,7 @@ export default class App {
         this.startToken = 0;
         this.pickerPanelId = PICKER_PANELS[0];
         this.bpm = Number(this.$bpmSlider.val()) || DEFAULT_BPM;
-        this.patternValue = PATTERN_GROUPS[0].patterns[0].value;
+        this.patternValue = this.patternSelection.getValue();
 
         this.buildPatternSelect();
         this.initPickerPanels();
@@ -181,6 +210,10 @@ export default class App {
         this.setMode('menu');
         this.handleResize();
         this.setPatternValue(this.patternValue);
+        if (this.patternValue === CUSTOM_PATTERN_VALUE) {
+            this.$input.val(this.patternSelection.getCustomSiteswap());
+        }
+        this.validate();
         this.updateMuteButton();
         this.syncSettingsPanel();
     }
@@ -265,6 +298,7 @@ export default class App {
 
     setPatternValue(value) {
         this.patternValue = value;
+        this.patternSelection.setValue(value);
         this.$patternSelectList.find('.pattern-select-option').removeClass('selected');
 
         if (value === CUSTOM_PATTERN_VALUE) {
@@ -308,7 +342,12 @@ export default class App {
 
         $(document).on('click', () => this.setPatternListOpen(false));
 
-        this.$input.on('input', () => this.validate());
+        this.$input.on('input', () => {
+            if (this.patternValue === CUSTOM_PATTERN_VALUE) {
+                this.patternSelection.setCustomSiteswap(this.$input.val());
+            }
+            this.validate();
+        });
         this.$input.on('keydown', (event) => {
             if (event.key === 'Enter' && this.siteswap && this.siteswap.isValid) {
                 event.preventDefault();
@@ -399,30 +438,61 @@ export default class App {
             });
         });
         this.$creditsLink.on('click', () => this.openContentModal('credits-overlay'));
+
+        // Delegated (not bound directly to the button) since both overlays'
+        // .app-modal-body is replaced wholesale on every re-render (see
+        // openContentModal) - a direct binding would go stale the moment
+        // either modal is reopened.
+        $('#leaderboard-overlay').on('click', '[data-action="leaderboard-reset"]', () => {
+            this.scores.resetAll();
+            this.openContentModal('leaderboard-overlay', { scores: this.scores.getAll() });
+        });
+        $('#game-over-overlay').on('click', '[data-action="game-over-save"]', () => this.saveGameOverScore());
+        $('#game-over-overlay').on('keydown', '#game-over-name-input', (event) => {
+            if (event.key === 'Enter') this.saveGameOverScore();
+        });
     }
 
     /**
      * Opens a text-content modal. If `data` is passed and the overlay has a
      * matching entry in CONTENT_MODAL_BODY_TEMPLATES, its .app-modal-body is
-     * re-rendered with that data first - e.g. the leaderboard passing fresh
-     * `{ scores }` each time it's reopened, rather than only ever showing
-     * whatever it was first rendered with at startup (see
-     * CONTENT_MODAL_TEMPLATES). Modals with no such entry (credits,
-     * controls, siteswap-basics) just ignore `data` and show as-is.
+     * re-rendered with that data first - e.g. the leaderboard/game-over
+     * modals passing fresh `{ scores }` each time they're reopened, rather
+     * than only ever showing whatever they were first rendered with at
+     * startup (see CONTENT_MODAL_TEMPLATES). Modals with no such entry
+     * (credits, controls, siteswap-basics) just ignore `data` and show
+     * as-is. `data.highlightId` (score-table overlays only) both flags a
+     * row for score-table.handlebars to mark and, once rendered, gets
+     * scrolled into view (see scrollToHighlightedScoreRow).
      */
     openContentModal(overlayId, data) {
         const bodyTemplate = CONTENT_MODAL_BODY_TEMPLATES[overlayId];
         if (bodyTemplate && data) {
-            const renderData = overlayId === 'leaderboard-overlay'
-                ? leaderboardModalData(data.scores || [])
+            const renderData = SCORE_TABLE_OVERLAYS.has(overlayId)
+                ? { ...data, scores: buildScoreTableData(data.scores || [], { highlightId: data.highlightId }) }
                 : data;
             $(`#${overlayId} .app-modal-body`).html(bodyTemplate(renderData));
+            if (data.highlightId) this.scrollToHighlightedScoreRow(overlayId);
         }
         $(`#${overlayId}`).removeClass('hidden');
     }
 
+    /** Scrolls a just-rendered score-table overlay so its newly-highlighted row (see openContentModal) is actually in view, not just marked. */
+    scrollToHighlightedScoreRow(overlayId) {
+        requestAnimationFrame(() => {
+            const row = document.querySelector(`#${overlayId} .leaderboard-row-highlight`);
+            if (row) row.scrollIntoView({ block: 'center' });
+        });
+    }
+
     closeContentModal($overlay) {
         $overlay.addClass('hidden');
+        // The Game Over modal (see handleGameOver) is shown "in place",
+        // straight over gameplay's own last (frozen) frame, rather than
+        // after already returning to the menu underneath - so the actual
+        // return trip only happens once the player's done with it, whether
+        // they saved their score or just closed it.
+        if ($overlay.is('#game-over-overlay')) this.returnToMenuAfterGameOver();
     }
 
     /** Closes whichever text-content modal is open, if any. Returns true if one was closed. */
@@ -494,11 +564,21 @@ export default class App {
         this.$muteButton.attr('title', muted ? 'Unmute' : 'Mute');
     }
 
-    /** Swaps between the menu/demo/game screens - see index.less for what each body class actually shows/hides. Pass null for a blank body (everything hidden) between staged transitions. */
-    setMode(mode) {
+    /**
+     * Swaps between the menu/demo/game screens - see index.less for what
+     * each body class actually shows/hides. Pass null for a blank body
+     * (everything hidden) between staged transitions. `competitive` (only
+     * meaningful alongside mode: 'game' - see startGame) adds a second body
+     * class that swaps the streak/best HUD and BPM slider for competitive
+     * mode's single score stat (see body.mode-competitive in index.less) -
+     * folded into this one class-setting call, rather than a separate
+     * toggleClass, since this method already fully replaces the body's
+     * class attribute on every other call anyway.
+     */
+    setMode(mode, { competitive = false } = {}) {
         const leavingMenu = this.mode === 'menu' && mode !== 'menu';
         this.mode = mode;
-        this.$body.attr('class', mode ? `mode-${mode}` : '');
+        this.$body.attr('class', mode ? `mode-${mode}${competitive ? ' mode-competitive' : ''}` : '');
         if (mode === 'menu') {
             this.menuOrbAnimation.start();
         } else if (leavingMenu) {
@@ -547,21 +627,22 @@ export default class App {
                 this.setPickerPanel('difficulty');
                 break;
             case 'practice':
-                this.startGame();
+                this.startGame({ mode: 'practice' });
                 break;
             case 'tutorial':
                 this.setPickerPanel('tutorial');
                 break;
             case 'leaderboard':
-                // TODO: pass real scores once they're actually collected/
-                // persisted somewhere, rather than the MOCK_LEADERBOARD_SCORES stand-in.
-                this.openContentModal('leaderboard-overlay', { scores: MOCK_LEADERBOARD_SCORES });
+                this.openContentModal('leaderboard-overlay', { scores: this.scores.getAll() });
                 break;
             case 'difficulty-easier':
+                this.startGame({ mode: 'competitive', difficulty: 'easier' });
+                break;
             case 'difficulty-normal':
+                this.startGame({ mode: 'competitive', difficulty: 'normal' });
+                break;
             case 'difficulty-harder':
-                // TODO: start gameplay at the chosen difficulty.
-                console.log('Starting game at difficulty', action);
+                this.startGame({ mode: 'competitive', difficulty: 'harder' });
                 break;
             case 'interactive-tutorial':
                 console.log('Starting interactive tutorial');
@@ -790,10 +871,27 @@ export default class App {
         };
     }
 
-    /** "Let me try!" - hands off to Game for everything from here on. */
-    startGame() {
+    /** Display name for whatever pattern is currently selected - used to label a competitive run's saved score (see handleGameOver). */
+    getCurrentPatternName() {
+        if (this.patternValue === CUSTOM_PATTERN_VALUE) {
+            return this.$input.val().trim() || 'Custom';
+        }
+        return findPattern(this.patternValue)?.name || this.patternValue;
+    }
+
+    /**
+     * "Let me try!" - hands off to Game for everything from here on.
+     * `mode`/`difficulty` distinguish practice (the only mode before
+     * competitive existed - see the difficulty sub-menu's own "Practice
+     * mode" button) from competitive play at a chosen difficulty (see
+     * DIFFICULTY_CONFIG and the difficulty-* menu actions).
+     */
+    startGame({ mode = 'practice', difficulty = null } = {}) {
         if (!this.siteswap || !this.siteswap.isValid) return;
         this.clearSession();
+
+        const difficultyConfig = mode === 'competitive' ? DIFFICULTY_CONFIG[difficulty] : null;
+        const pattern = this.getCurrentPatternName();
 
         // Staged transition: fade the title screen out on its own (still
         // showing whichever sub-menu was open), reset the picker once it's
@@ -804,14 +902,14 @@ export default class App {
             if (startToken !== this.startToken) return;
 
             this.setPickerPanel(PICKER_PANELS[0], { instant: true });
-            this.setMode('game');
+            this.setMode('game', { competitive: mode === 'competitive' });
             this.renderer.resize();
 
             // Start drawing immediately as the canvas fades in, rather than
             // waiting for the fade to finish (which left a blank screen that
             // suddenly popped into gameplay).
             this.game = new Game(this.siteswap, {
-                bpm: this.bpm,
+                bpm: difficultyConfig ? difficultyConfig.startBpm : this.bpm,
                 renderer: this.renderer,
                 $beatBar: this.$beatBar,
                 $beatBarWrap: this.$beatBarWrap,
@@ -819,10 +917,62 @@ export default class App {
                 $maxStreakValue: this.$maxStreakValue,
                 soundtrack: this.soundtrack,
                 settings: this.settings,
+                mode,
+                difficultyConfig,
+                $scoreValue: this.$scoreValue,
+                $grooveCountdown: this.$grooveCountdown,
+                $grooveCountdownValue: this.$grooveCountdownValue,
+                onGameOver: ({ score }) => this.handleGameOver({ score, difficulty: difficultyConfig?.label, pattern }),
             });
             this.game.start();
 
             return this.soundtrack.resume();
+        });
+    }
+
+    /**
+     * A competitive run just ended (see Game.triggerGameOver) - shows the
+     * Game Over modal right away, straight over gameplay's own last
+     * (frozen) frame, rather than only after already fading back to the
+     * menu underneath it (see closeContentModal/returnToMenuAfterGameOver
+     * for that trip, deferred until the player's actually done with this
+     * modal). The score itself isn't saved yet - see
+     * saveGameOverScore/game-over-body.handlebars's name field - so
+     * closing this modal without saving simply discards it.
+     */
+    handleGameOver({ score, difficulty, pattern }) {
+        this.pendingGameOverScore = { score, difficulty, pattern };
+        this.openContentModal('game-over-overlay', {
+            scores: this.scores.getAll(),
+            pendingScore: this.pendingGameOverScore,
+        });
+    }
+
+    /** Runs stop()'s own staged fade-to-black-then-menu transition once the Game Over modal (see handleGameOver) has actually been dismissed. */
+    returnToMenuAfterGameOver() {
+        if (this.mode !== 'game') return; // Already left - e.g. the modal somehow got closed twice.
+
+        const stopToken = this.startToken;
+        this.setMode(null);
+        waitMs(SCREEN_FADE_MS).then(() => {
+            if (stopToken !== this.startToken) return;
+
+            this.clearSession();
+            this.setPickerPanel(PICKER_PANELS[0], { instant: true });
+            this.setMode('menu');
+        });
+    }
+
+    /** Commits the just-finished competitive run (see handleGameOver) under whatever name was entered, then re-renders the modal with it saved, sorted, and highlighted. */
+    saveGameOverScore() {
+        if (!this.pendingGameOverScore) return;
+        const name = $('#game-over-name-input').val();
+        const entry = this.scores.add({ ...this.pendingGameOverScore, player: name });
+        this.pendingGameOverScore = null;
+        this.openContentModal('game-over-overlay', {
+            scores: this.scores.getAll(),
+            pendingScore: null,
+            highlightId: entry.id,
         });
     }
 

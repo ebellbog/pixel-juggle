@@ -1,0 +1,15 @@
+{{!-- Game Over modal body - a name-entry row (only while this run hasn't
+     been saved yet, see `pendingScore`/App.handleGameOver) sitting above the
+     same score-table the Scores modal uses, so a finished competitive run
+     can be named and saved before it takes its place - highlighted - among
+     everyone else's history (see App.saveGameOverScore). --}}
+{{#if pendingScore}}
+<div class="game-over-save">
+    <label for="game-over-name-input">Save your score as:</label>
+    <div class="game-over-save-row">
+        <input type="text" id="game-over-name-input" maxlength="24" placeholder="Player name" autocomplete="off">
+        <button type="button" class="action-button" data-action="game-over-save">Save score</button>
+    </div>
+</div>
+{{/if}}
+{{> score-table scores=scores}}

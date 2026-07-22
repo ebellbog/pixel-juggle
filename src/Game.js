@@ -14,6 +14,16 @@ const LANDING_EPSILON = 1e-9;
 // How long the wedge flashes green (throw fired) or red (beat cancel).
 const BEAT_FLASH_MS = 180;
 
+// Competitive mode only (see startGrooveCountdown): how many *beats* (not
+// wall-clock seconds - see there for why) the player has to get back "in
+// the groove" (a full clean period - see recordThrowSequenceOutcome) after
+// a mistake, before it's game over. Indexed by (this.mistakeCount - 1),
+// clamped to the last entry for every mistake past the first - escalating
+// pressure over a run, rather than a single fixed grace window throughout
+// (this.mistakeCount itself never resets on a successful recovery, only on
+// a fresh restart - see resetState).
+const GROOVE_COUNTDOWN_SCHEDULE_BEATS = [10, 5];
+
 /**
  * Everything that happens once the player commits to "Let me try!": the
  * static ghost-path preview, plus letting the player actually throw balls.
@@ -85,12 +95,35 @@ const BEAT_FLASH_MS = 180;
  * lives there.
  */
 export default class Game {
-    constructor(siteswap, { bpm, renderer, $beatBar, $beatBarWrap, $streakValue, $maxStreakValue, soundtrack, settings }) {
+    constructor(siteswap, {
+        bpm, renderer, $beatBar, $beatBarWrap, $streakValue, $maxStreakValue, soundtrack, settings,
+        // Competitive mode (easier/normal/harder - as opposed to practice,
+        // the only mode before this - see App.DIFFICULTY_CONFIG) swaps the
+        // streak/best HUD for a single score stat, ramps BPM on its own
+        // rather than the (hidden) slider, and can end the run outright -
+        // see updateStatsDisplay/recordThrowSequenceOutcome/
+        // startGrooveCountdown/triggerGameOver, all gated on isCompetitive.
+        // Every param below this line is competitive-only; practice mode
+        // leaves them all at their defaults and never touches the state
+        // they'd drive.
+        mode = 'practice',
+        difficultyConfig = null, // { label, startBpm, bpmIncrement }
+        $scoreValue = null,
+        $grooveCountdown = null,
+        $grooveCountdownValue = null,
+        onGameOver = null, // ({ score }) => void - called once, after this.stop() has already run.
+    }) {
         this.renderer = renderer;
         this.$beatBar = $beatBar;
         this.$beatBarWrap = $beatBarWrap;
         this.$streakValue = $streakValue;
         this.$maxStreakValue = $maxStreakValue;
+        this.isCompetitive = mode === 'competitive';
+        this.difficultyConfig = difficultyConfig;
+        this.$scoreValue = $scoreValue;
+        this.$grooveCountdown = $grooveCountdown;
+        this.$grooveCountdownValue = $grooveCountdownValue;
+        this.onGameOver = onGameOver;
         // A percussive tick per beat and a fading tone per manual throw -
         // see onBeat/executeThrow below and Soundtrack itself. Always
         // present (App hands over a real instance), and every one of its
@@ -249,12 +282,35 @@ export default class Game {
         // targeted - { crossing } or null (see handleThrowStart/Release).
         this.dangerHold = { L: null, R: null };
 
+        // Competitive mode only - see the constructor's doc comment.
+        // this.mistakeCount deliberately isn't reset by a mid-run recovery
+        // (see recordThrowSequenceOutcome/startGrooveCountdown) - only a
+        // fresh restart/new game resets the escalating grace-window
+        // schedule back to its most forgiving entry. BPM is reset back to
+        // the difficulty's own starting tempo here too, since a restart
+        // should also undo whatever ramping (see the chord-progression
+        // branch in recordThrowSequenceOutcome) happened before it.
+        if (this.isCompetitive) {
+            this.score = 0;
+            this.mistakeCount = 0;
+            this.grooveCountdownActive = false;
+            this.grooveDeadline = null;
+            this.grooveDisplayedBeat = null;
+            this.gameOverTriggered = false;
+            if (this.difficultyConfig) this.setBpm(this.difficultyConfig.startBpm);
+            if (this.$grooveCountdown) this.$grooveCountdown.addClass('hidden');
+        }
+
         this.lastTimestamp = performance.now();
         this.updateStatsDisplay();
     }
 
-    /** Refreshes the top-center streak HUD (see App's #game-stats). */
+    /** Refreshes the top-center HUD - streak/best for practice, or the single larger score stat for competitive (see App's #game-stats). */
     updateStatsDisplay() {
+        if (this.isCompetitive) {
+            if (this.$scoreValue) this.$scoreValue.text(this.score);
+            return;
+        }
         if (this.$streakValue) this.$streakValue.text(this.throwSequenceStreak);
         if (this.$maxStreakValue) this.$maxStreakValue.text(this.maxStreak);
     }
@@ -654,9 +710,19 @@ export default class Game {
             if (this.throwSequenceStreak > this.maxStreak) {
                 this.maxStreak = this.throwSequenceStreak;
             }
+            // Competitive mode: +1 per correct throw, no cap/reset - see
+            // the constructor's doc comment. Practice's streak/best above
+            // still track independently either way (they're just not
+            // displayed - see updateStatsDisplay), so nothing here needs
+            // its own mode check beyond this one line.
+            if (this.isCompetitive) this.score += 1;
             this.updateStatsDisplay();
             if (this.throwSequenceStreak >= this.paths.length) {
                 this.throwSequenceHidden = false;
+                // Ghost highlight is back on - the player's "back in the
+                // groove" (see class doc/startGrooveCountdown), so whatever
+                // countdown a recent mistake started is called off.
+                if (this.isCompetitive) this.clearGrooveCountdown();
             }
             if (this.throwSequencePending.size === 0) {
                 this.throwSequenceIndex = (this.throwSequenceIndex + 1) % this.throwSequenceSteps.length;
@@ -666,15 +732,109 @@ export default class Game {
             this.soundtrackSuccessCount += 1;
             if (this.soundtrackSuccessCount >= this.physics.effectivePeriodForMusic) {
                 this.soundtrackSuccessCount = 0;
-                this.soundtrack.advancePeriod();
+                // Competitive mode: tempo ramps once the whole *sequence*
+                // of chords has looped back to its first one (see
+                // Soundtrack.advancePeriod's return value), not on every
+                // single step within it - a step happens every period,
+                // but a full lap is PROGRESSION.length periods.
+                const completedChordLap = this.soundtrack.advancePeriod();
+                if (this.isCompetitive && this.difficultyConfig && completedChordLap) {
+                    this.setBpm(this.physics.bpm + this.difficultyConfig.bpmIncrement);
+                }
             }
         } else if (this.throwSequenceStarted) {
             this.throwSequenceStreak = 0;
             this.updateStatsDisplay();
+            // Only a *fresh* mismatch - the transition from "in the groove"
+            // to not - starts a new countdown; repeated mismatches while
+            // one's already running (this.throwSequenceHidden already
+            // true) must not keep pushing the deadline back out (see
+            // startGrooveCountdown).
+            if (this.isCompetitive && !this.throwSequenceHidden) {
+                this.startGrooveCountdown();
+            }
             this.throwSequenceHidden = true;
             this.soundtrackSuccessCount = 0;
             this.soundtrack.resetProgression();
         }
+    }
+
+    /**
+     * Competitive mode only: starts (or restarts, on top of an already-
+     * active one - see the guard in recordThrowSequenceOutcome's caller)
+     * the "get back in the groove" grace window after a mistake. Its
+     * length comes off GROOVE_COUNTDOWN_SCHEDULE_BEATS, indexed by how
+     * many mistakes this run has had so far, including this one -
+     * escalating pressure over a run rather than one fixed window
+     * throughout.
+     *
+     * Deliberately paced in *beats*, not wall-clock seconds: the schedule
+     * is a beat count, converted to real milliseconds via this.physics.bpm
+     * at the instant the mistake happens, so the grace window is exactly
+     * as long as that many beats at whatever tempo is currently live - the
+     * faster the game, the faster (in real time) the countdown runs, same
+     * as everything else here. bpm can't itself change again before this
+     * window ends (competitive's own ramp only fires on a clean full lap
+     * of the chord progression - see recordThrowSequenceOutcome - which
+     * can't happen while a mismatch is still unresolved), so one
+     * beats-to-ms conversion up front is exact for the window's whole
+     * duration, not just its start. Actually ticked down in
+     * updateGrooveCountdown (see tick()), not here - this just marks the
+     * deadline.
+     */
+    startGrooveCountdown() {
+        this.mistakeCount += 1;
+        const scheduleIndex = Math.min(this.mistakeCount, GROOVE_COUNTDOWN_SCHEDULE_BEATS.length) - 1;
+        const beats = GROOVE_COUNTDOWN_SCHEDULE_BEATS[scheduleIndex];
+        this.grooveBeatDurationMs = (60 / this.physics.bpm) * 1000;
+        this.grooveCountdownActive = true;
+        this.grooveDeadline = performance.now() + beats * this.grooveBeatDurationMs;
+        this.grooveDisplayedBeat = null;
+    }
+
+    /** Cancels an in-progress grace window - the player recovered in time. */
+    clearGrooveCountdown() {
+        if (!this.grooveCountdownActive) return;
+        this.grooveCountdownActive = false;
+        this.grooveDeadline = null;
+        this.grooveDisplayedBeat = null;
+        if (this.$grooveCountdown) this.$grooveCountdown.addClass('hidden');
+    }
+
+    /**
+     * Ticks the active grace window (see tick()): ends the run once its
+     * deadline passes, otherwise keeps the big red numeral in sync with
+     * however many whole beats (see startGrooveCountdown for why beats,
+     * not seconds) remain, only touching the DOM (and restarting its pop
+     * animation - see index.less' .groove-countdown-pop) on the beat it
+     * actually changes rather than every frame.
+     */
+    updateGrooveCountdown() {
+        if (!this.grooveCountdownActive) return;
+        const remainingMs = this.grooveDeadline - performance.now();
+        if (remainingMs <= 0) {
+            this.triggerGameOver();
+            return;
+        }
+        const beatsLeft = Math.ceil(remainingMs / this.grooveBeatDurationMs);
+        if (beatsLeft === this.grooveDisplayedBeat) return;
+        this.grooveDisplayedBeat = beatsLeft;
+        if (!this.$grooveCountdown || !this.$grooveCountdownValue) return;
+        this.$grooveCountdown.removeClass('hidden');
+        this.$grooveCountdownValue.text(beatsLeft);
+        const el = this.$grooveCountdownValue[0];
+        el.classList.remove('groove-countdown-pop');
+        void el.offsetWidth; // Force reflow so re-adding the class below restarts the animation.
+        el.classList.add('groove-countdown-pop');
+    }
+
+    /** Ends a competitive run: stops ticking/input, then hands the final score up to App (see onGameOver) to run the game-over transition/modal. */
+    triggerGameOver() {
+        if (this.gameOverTriggered) return;
+        this.gameOverTriggered = true;
+        const finalScore = this.score;
+        this.stop();
+        if (this.onGameOver) this.onGameOver({ score: finalScore });
     }
 
     /** Whether this hand can throw on the beat - queue nonempty, or a ball landing now. */
@@ -838,6 +998,14 @@ export default class Game {
             this.resolveLandings();
             remaining -= step;
         }
+        if (this.isCompetitive) {
+            this.updateGrooveCountdown();
+            // triggerGameOver() already called this.stop() (rafId is back
+            // to null) - bail out here rather than drawing one more frame
+            // and scheduling a tick that would never get cancelled.
+            if (this.gameOverTriggered) return;
+        }
+
         this.expireBeatFlashes();
         this.updateChargeTicks();
 
@@ -1036,5 +1204,9 @@ export default class Game {
         this.beatFlash = { L: null, R: null };
         this.dangerHold = { L: null, R: null };
         this.$beatBarWrap.addClass('hidden');
+        if (this.isCompetitive) {
+            this.grooveCountdownActive = false;
+            if (this.$grooveCountdown) this.$grooveCountdown.addClass('hidden');
+        }
     }
 }

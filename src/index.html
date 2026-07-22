@@ -14,7 +14,7 @@
         <!-- Menu screen: siteswap picker + Show me/Let me try - hidden once a
              demo or game is running (see body.mode-demo/mode-game in index.less). -->
         <div id="title-screen">
-            <h1 id="game-title">PiXel JuGGle</h1>
+            <h1 id="game-title" data-text="PiXel JuGGle">PiXel JuGGle</h1>
             <div id="pattern-picker">
                 <div class="menu-orb menu-orb--stripes-a" aria-hidden="true"></div>
                 <div class="menu-orb menu-orb--stripes-b" aria-hidden="true"></div>
@@ -42,14 +42,14 @@
                             </div>
                             <div id="menu-spacer"></div>
                             <div id="menu-buttons">
-                                <button type="button" class="action-button" data-action="tutorial" disabled>
-                                    <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
-                                </button>
                                 <button type="button" class="action-button" data-action="show-me" disabled>
                                     <span class="material-symbols-outlined button-icon" aria-hidden="true">visibility</span> Show me
                                 </button>
                                 <button type="button" class="action-button" data-action="try" disabled>
                                     <span class="material-symbols-outlined button-icon" aria-hidden="true">person_play</span> Juggle
+                                </button>
+                                <button type="button" class="action-button" data-action="tutorial" disabled>
+                                    <span class="material-symbols-outlined button-icon" aria-hidden="true">school</span> Tutorial
                                 </button>
                                 <button type="button" class="action-button" data-action="leaderboard">
                                     <span class="material-symbols-outlined button-icon" aria-hidden="true">leaderboard</span> Scores
@@ -100,15 +100,35 @@
                 <div id="beat-bar"></div>
             </div>
             <div id="game-stats">
-                <div class="stat stat-before">
-                    <span class="stat-label">Streak</span>
-                    <span id="streak-value" class="stat-value">0</span>
+                <!-- Practice mode: correct-throw streak/best (see
+                     body.mode-competitive in index.less, which swaps to
+                     #competitive-stat-group below instead). -->
+                <div id="practice-stat-group" class="stat-group">
+                    <div class="stat stat-before">
+                        <span class="stat-label">Streak</span>
+                        <span id="streak-value" class="stat-value">0</span>
+                    </div>
+                    <div class="stat-divider" aria-hidden="true"></div>
+                    <div class="stat stat-after">
+                        <span class="stat-label">Best</span>
+                        <span id="max-streak-value" class="stat-value">0</span>
+                    </div>
                 </div>
-                <div class="stat-divider" aria-hidden="true"></div>
-                <div class="stat stat-after">
-                    <span class="stat-label">Best</span>
-                    <span id="max-streak-value" class="stat-value">0</span>
+                <!-- Competitive mode (easier/normal/harder): a single,
+                     larger score stat in place of the streak/best pair
+                     above (see Game's isCompetitive). -->
+                <div id="competitive-stat-group" class="stat-group">
+                    <div class="stat stat-score stat-large">
+                        <span class="stat-label">Score</span>
+                        <span id="score-value" class="stat-value">0</span>
+                    </div>
                 </div>
+            </div>
+            <!-- Competitive mode's "get back in the groove" grace-window
+                 countdown (see Game.updateGrooveCountdown) - big red
+                 numerals animating over the center of the canvas. -->
+            <div id="groove-countdown" class="hidden" aria-hidden="true">
+                <span id="groove-countdown-value"></span>
             </div>
             <div id="bpm-control">
                 <label for="bpm-slider">BPM</label>
@@ -178,10 +198,10 @@
             </div>
         </div>
 
-        <!-- Credits/Controls/Siteswap basics/Leaderboard modals are rendered
-             here at startup from src/templates/*-modal.handlebars (see
-             App.renderContentModals) - each is a thin Handlebars partial
-             block "inheriting" the shared shell in
+        <!-- Credits/Controls/Siteswap basics/Scores/Game Over modals are
+             rendered here at startup from src/templates/*-modal.handlebars
+             (see App.renderContentModals) - each is a thin Handlebars
+             partial block "inheriting" the shared shell in
              src/templates/partials/modal.handlebars. -->
     </div>
 </body>

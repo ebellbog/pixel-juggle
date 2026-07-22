@@ -1,0 +1,33 @@
+{{!-- The actual player/pattern/difficulty/score table (see .leaderboard-table
+     in index.less) - shared by the Scores modal (leaderboard-table.handlebars,
+     which adds the "Reset all scores" footer below) and the Game Over modal
+     (game-over-body.handlebars, which has no such footer). `scores` entries
+     may carry a `highlighted` flag (see App.buildScoreTableData) to mark the
+     row a just-finished competitive run should scroll to (see
+     App.scrollToHighlightedScoreRow). --}}
+<div class="leaderboard-table-wrap" tabindex="0">
+    <table class="leaderboard-table">
+        <thead>
+            <tr>
+                <th>Player</th>
+                <th>Pattern</th>
+                <th>Difficulty</th>
+                <th>Score</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{#each scores}}
+            <tr class="{{#if highlighted}}leaderboard-row-highlight{{/if}}" data-score-id="{{id}}">
+                <td>{{player}}</td>
+                <td>{{pattern}}</td>
+                <td>{{difficulty}}</td>
+                <td>{{score}}</td>
+            </tr>
+            {{else}}
+            <tr>
+                <td colspan="4" class="leaderboard-empty">No scores yet.</td>
+            </tr>
+            {{/each}}
+        </tbody>
+    </table>
+</div>

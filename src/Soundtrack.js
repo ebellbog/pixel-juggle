@@ -732,6 +732,13 @@ export default class Soundtrack {
      * thing, not something to redo every lap after that, since the break
      * should just keep going once it starts rather than restarting in sync
      * with the chords.
+     *
+     * Returns whether this call completed a full lap of PROGRESSION - i.e.
+     * progressionIndex just wrapped back to its first chord, rather than
+     * landing on some other chord partway through it. Competitive mode's
+     * BPM ramp (see Game.recordThrowSequenceOutcome) reads this to ramp
+     * once per full *sequence* of chords, not on every single step within
+     * one.
      */
     advancePeriod() {
         this.progressionIndex = (this.progressionIndex + 1) % PROGRESSION.length;
@@ -739,6 +746,7 @@ export default class Soundtrack {
         if (this.periodsCompleted === DRUM_BREAK_PERIODS_THRESHOLD) {
             this.drumBreakMeasureIndex = 0;
         }
+        return this.progressionIndex === 0;
     }
 
     /**

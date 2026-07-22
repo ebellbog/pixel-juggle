@@ -17,8 +17,8 @@
 @action-muted: @bg; // Practice, Interactive tutorial — dark fill, white outline.
 @action-controls: #4589e6;
 @action-siteswap-basics: #5ec98a;
-@action-tutorial: darken(@orb-picker, 20%);
-@action-show-me: @orb-pink;
+@action-tutorial: @orb-pink;
+@action-show-me: darken(@orb-picker, 20%);
 @action-try: @orb-bottom;
 @action-leaderboard: @orb-top;
 @action-difficulty-easier: @orb-lime;
@@ -92,12 +92,11 @@
     }
 }
 
-// Full-width dark sub-menu primary (Practice, Interactive tutorial).
-.action-button-muted-full-width() {
+// Dark fill, white outline (Practice, Interactive tutorial's full-width
+// variant below, and Game Over's inline "Save score" button - see
+// .game-over-save-row).
+.action-button-muted() {
     .action-button-style(@action-muted);
-    width: 100%;
-    box-sizing: border-box;
-    text-align: center;
 
     // .action-button-style()'s own &:not(:disabled) border rule above
     // outweighs a plain border-color/border-width override here (both are
@@ -111,6 +110,14 @@
     &:not(:hover) {
         box-shadow: 2px 2px 0 darken(white, 25%);
     }
+}
+
+// Full-width dark sub-menu primary (Practice, Interactive tutorial).
+.action-button-muted-full-width() {
+    .action-button-muted();
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
 }
 
 // Horizontal row of equal-width sub-menu buttons (difficulty pick, tutorial
@@ -244,6 +251,25 @@ body.mode-game {
     }
 }
 
+// Competitive mode (easier/normal/harder - see Game's isCompetitive) swaps
+// the streak/best pair for a single score stat and hides the BPM slider
+// (ramped automatically instead - see Game.recordThrowSequenceOutcome),
+// without otherwise touching #game-stats/#canvas-area's own fade above -
+// mode-competitive only ever accompanies mode-game (see App.setMode).
+body.mode-competitive {
+    #practice-stat-group {
+        display: none;
+    }
+
+    #competitive-stat-group {
+        display: flex;
+    }
+
+    #bpm-control {
+        display: none;
+    }
+}
+
 // --- Title screen (menu) ----------------------------------------------
 
 #game-title {
@@ -258,9 +284,45 @@ body.mode-game {
     letter-spacing: 6px;
     margin: 0 0 6vh;
     color: @text;
-    text-shadow: 0 0 18px fade(@accent, 65%), 0 0 40px fade(@accent, 35%);
     text-align: center;
+    position: relative;
+    isolation: isolate;
     z-index: 1;
+
+    // Rainbow glow: blurred duplicate of the title text (data-text on the h1).
+    &::before,
+    &::after {
+        content: attr(data-text);
+        position: absolute;
+        inset: 0;
+        font-family: inherit;
+        font-size: inherit;
+        font-weight: bold;
+        letter-spacing: inherit;
+        text-align: inherit;
+        color: transparent;
+        background: linear-gradient(
+            90deg,
+            @orb-pink,
+            @warning,
+            @orb-picker,
+            @orb-bottom,
+        );
+        -webkit-background-clip: text;
+        background-clip: text;
+        pointer-events: none;
+        z-index: -1;
+    }
+
+    &::before {
+        filter: blur(10px);
+        opacity: 0.4;
+    }
+
+    &::after {
+        filter: blur(32px);
+        opacity: 0.4;
+    }
 }
 
 // Centered on the title screen. Three decorative orbs (.menu-orb) follow a
@@ -824,21 +886,38 @@ body.mode-game {
     text-align: center;
 }
 
-// Correct-throw streak for "Let me try!" - top center (see body.mode-game
-// above). Full-width 1fr | divider | 1fr grid pins the separator to the
-// exact horizontal center of the page, with each stat the same distance out
-// from it regardless of how wide its label/value pair grows.
+// Top-center HUD for "Let me try!" - either #practice-stat-group (streak/
+// best) or #competitive-stat-group (a single score stat), never both (see
+// body.mode-competitive above) - this outer element just positions
+// whichever is showing and fades with the rest of #canvas-area (see
+// body.mode-game above).
 #game-stats {
-    display: grid;
     position: absolute;
     top: 22px;
     left: 0;
     right: 0;
+    display: flex;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 5;
+}
+
+// Full-width 1fr | divider | 1fr grid pins the separator to the exact
+// horizontal center of the page, with each stat the same distance out from
+// it regardless of how wide its label/value pair grows.
+#practice-stat-group {
+    display: grid;
+    width: 100%;
     grid-template-columns: 1fr auto 1fr;
     align-items: center;
     column-gap: 30px;
-    pointer-events: none;
-    z-index: 5;
+}
+
+// Hidden by default (practice mode's the plain default) - shown instead of
+// the group above under body.mode-competitive (see there).
+#competitive-stat-group {
+    display: none;
+    align-items: center;
 }
 
 .stat {
@@ -848,6 +927,25 @@ body.mode-game {
     gap: 10px;
     width: 84px;
     white-space: nowrap;
+}
+
+.stat-score {
+    width: auto;
+    gap: 14px;
+}
+
+.stat-large {
+    transform: translateY(-4px);
+
+    .stat-label {
+        font-size: 17px;
+        letter-spacing: 0.7px;
+    }
+
+    .stat-value {
+        font-size: 38px;
+        min-width: 90px;
+    }
 }
 
 .stat-before {
@@ -880,6 +978,64 @@ body.mode-game {
 // leaving dead space after single-digit counts on the left.
 .stat-before .stat-value {
     text-align: right;
+}
+
+// Competitive mode's "get back in the groove" grace-window countdown (see
+// Game.updateGrooveCountdown) - large red numerals centered over the
+// canvas. Kept as its own #canvas-area child (not part of #game-stats)
+// since it isn't a persistent stat - it only exists while a grace window's
+// actually running, toggled straight via the shared .hidden utility rather
+// than the fade transitions the rest of the HUD uses (see there).
+#groove-countdown {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 6;
+}
+
+#groove-countdown-value {
+    font-family: 'Turret Road', sans-serif;
+    font-weight: 700;
+    font-size: 180px;
+    line-height: 1;
+    color: @invalid;
+    text-shadow: 0 0 10px fade(@invalid, 20%);
+    font-variant-numeric: tabular-nums;
+    opacity: 0;
+}
+
+// Restarted on every new beat by Game.updateGrooveCountdown (remove + force
+// reflow + re-add) - each numeral pops in oversized, settles to full size,
+// then shrinks away as it fades to make room for the next one.
+@groove-countdown-pop-duration: 950ms;
+
+.groove-countdown-pop {
+    animation: groove-countdown-pop @groove-countdown-pop-duration ease-out forwards;
+}
+
+@keyframes groove-countdown-pop {
+    0% {
+        opacity: 0;
+        transform: scale(1.7);
+    }
+
+    18% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    70% {
+        opacity: 1;
+        transform: scale(0.94);
+    }
+
+    100% {
+        opacity: 0;
+        transform: scale(0.78);
+    }
 }
 
 // Settings gear - upper-left, matching #game-controls' placement on the right.
@@ -1126,6 +1282,16 @@ body.mode-game {
         background-color: fade(black, 12%);
     }
 
+    // A just-saved competitive run (see App.saveGameOverScore) - nested,
+    // same specificity-over-nth-child reasoning as .leaderboard-empty
+    // below, and placed after those rules so it wins on top of whichever
+    // odd/even shade this row would otherwise get. Settles back to that
+    // plain alternating shade once the highlight fades rather than staying
+    // tinted forever.
+    tr.leaderboard-row-highlight {
+        animation: leaderboard-row-highlight-fade 2.6s ease-out;
+    }
+
     // Nested (not a standalone top-level rule) so this beats the plain
     // `td { text-align: left }` above on specificity - a bare
     // .leaderboard-empty selector (one class) loses to `.leaderboard-table
@@ -1134,6 +1300,65 @@ body.mode-game {
         text-align: center;
         color: fade(@text, 45%);
         font-style: italic;
+    }
+}
+
+@keyframes leaderboard-row-highlight-fade {
+    0% {
+        background-color: fade(@orb-lime, 40%);
+    }
+
+    100% {
+        background-color: transparent;
+    }
+}
+
+// --- Game Over modal (extends .app-modal-*/.leaderboard-table above) ----
+
+.game-over-save {
+    margin-bottom: 18px;
+    padding-bottom: 18px;
+    border-bottom: 1px solid fade(@text, 15%);
+
+    label {
+        .form-label-style();
+        display: block;
+        margin-bottom: 8px;
+    }
+}
+
+.game-over-save-row {
+    display: flex;
+    gap: 10px;
+
+    #game-over-name-input {
+        flex: 1;
+        min-width: 0;
+        box-sizing: border-box;
+        font-size: 15px;
+        font-family: 'Asimovian', monospace;
+        letter-spacing: 0.2px;
+        padding: 9px 10px;
+        border: 1px solid #3a3a52;
+        border-radius: @border-radius-small;
+        background: transparent;
+        color: @text;
+
+        &:focus {
+            outline: none;
+            border-color: white;
+        }
+
+        &:hover,
+        &:focus {
+            filter: brightness(1.4);
+        }
+    }
+
+    .action-button {
+        flex-shrink: 0;
+        padding-left: 14px;
+        .action-button-muted();
     }
 }
 

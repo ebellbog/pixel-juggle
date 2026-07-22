@@ -828,12 +828,25 @@ export default class Game {
         el.classList.add('groove-countdown-pop');
     }
 
-    /** Ends a competitive run: stops ticking/input, then hands the final score up to App (see onGameOver) to run the game-over transition/modal. */
+    /**
+     * Ends a competitive run: stops ticking/input, then hands the final
+     * score up to App (see onGameOver) to run the game-over transition/
+     * modal. `hideHud: false` (see stop()) leaves the beat bar/groove
+     * countdown showing exactly as they were the instant this fired -
+     * mode is still 'game' here, #canvas-area (their parent) hasn't
+     * started fading yet, so snapping them to display:none right now
+     * would flash them away well before any of App's staged fades even
+     * begin. They fade out later, together with the rest of #canvas-area's
+     * own opacity transition, and only actually get hidden once App tears
+     * this Game instance down for real (see App.returnToMenuAfterGameOver/
+     * clearSession, which calls stop() again with its default hideHud:
+     * true - harmless by then, since #canvas-area is already invisible).
+     */
     triggerGameOver() {
         if (this.gameOverTriggered) return;
         this.gameOverTriggered = true;
         const finalScore = this.score;
-        this.stop();
+        this.stop({ hideHud: false });
         if (this.onGameOver) this.onGameOver({ score: finalScore });
     }
 
@@ -1193,7 +1206,16 @@ export default class Game {
         this.draw();
     }
 
-    stop() {
+    /**
+     * `hideHud: false` (see triggerGameOver's doc comment) skips instantly
+     * `.hidden`-ing the beat bar/groove countdown - used only for the very
+     * first stop() call after a competitive loss, while they're still
+     * fully visible on screen; every other caller (the Stop button, a
+     * fresh startGame/startDemo tearing down a previous session, and
+     * clearSession's own later call once a game-over's fade is actually
+     * done) wants the normal immediate hide.
+     */
+    stop({ hideHud = true } = {}) {
         if (this.rafId !== null) {
             cancelAnimationFrame(this.rafId);
             this.rafId = null;
@@ -1203,10 +1225,10 @@ export default class Game {
         this.lockedThrow = { L: null, R: null };
         this.beatFlash = { L: null, R: null };
         this.dangerHold = { L: null, R: null };
-        this.$beatBarWrap.addClass('hidden');
-        if (this.isCompetitive) {
-            this.grooveCountdownActive = false;
-            if (this.$grooveCountdown) this.$grooveCountdown.addClass('hidden');
+        if (this.isCompetitive) this.grooveCountdownActive = false;
+        if (hideHud) {
+            this.$beatBarWrap.addClass('hidden');
+            if (this.isCompetitive && this.$grooveCountdown) this.$grooveCountdown.addClass('hidden');
         }
     }
 }

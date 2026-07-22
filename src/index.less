@@ -93,8 +93,8 @@
 }
 
 // Dark fill, white outline (Practice, Interactive tutorial's full-width
-// variant below, and Game Over's inline "Save score" button - see
-// .game-over-save-row).
+// variant below, and Game Over's stacked "Save score" button - see
+// .game-over-save).
 .action-button-muted() {
     .action-button-style(@action-muted);
 
@@ -109,6 +109,11 @@
 
     &:not(:hover) {
         box-shadow: 2px 2px 0 darken(white, 25%);
+    }
+
+    &:hover {
+        background-color: white;
+        color: @bg;
     }
 }
 
@@ -130,7 +135,6 @@
     .action-button {
         flex: 1;
         text-align: center;
-        padding-right: 5px;
     }
 }
 
@@ -681,12 +685,6 @@ body.mode-competitive {
     gap: 10px;
     width: 100%;
     margin-bottom: -12px;
-
-    // .action-button[data-action="leaderboard"] {
-    //     grid-column: 1 / -1;
-    //     justify-self: center;
-    //     width: 50%;
-    // }
 }
 
 .picker-panel-button-row {
@@ -719,11 +717,15 @@ body.mode-competitive {
     font-size: 16px;
     font-weight: bold;
     letter-spacing: .5px;
-    padding: 5px 12px 5px 6px;
+    padding: 5px 6px;
     border-radius: 50px;
     color: white;
     cursor: pointer;
     transition: all 0.15s ease, transform 0.1s ease;
+
+    &:has(.button-icon) {
+        padding-right: 12px;
+    }
 
     .button-icon {
         font-size: 20px;
@@ -789,6 +791,14 @@ body.mode-competitive {
 
     &[data-action="tutorial-siteswap-basics"] {
         .action-button-style(@action-siteswap-basics);
+    }
+
+    &[data-action="game-over-save"] {
+        .action-button-muted();
+
+        display: block;
+        margin: 0 auto;
+        width: 35%;
     }
 }
 
@@ -1163,7 +1173,7 @@ body.mode-competitive {
 .app-modal-title {
     margin: 0 0 24px;
     font-family: 'Turret Road', sans-serif;
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 700;
     letter-spacing: .5px;
     text-align: center;
@@ -1259,6 +1269,7 @@ body.mode-competitive {
         // would otherwise also match :last-child.
         &:last-child:not([colspan]) {
             text-align: right;
+            padding-right: 8px;
         }
     }
 
@@ -1274,12 +1285,8 @@ body.mode-competitive {
         border-bottom: 1px solid fade(@text, 30%);
     }
 
-    tbody tr:nth-child(odd) {
-        background-color: fade(white, 4%);
-    }
-
     tbody tr:nth-child(even) {
-        background-color: fade(black, 12%);
+        background-color: fade(white, 4%);
     }
 
     // A just-saved competitive run (see App.saveGameOverScore) - nested,
@@ -1313,32 +1320,50 @@ body.mode-competitive {
     }
 }
 
-// --- Game Over modal (extends .app-modal-*/.leaderboard-table above) ----
+// --- Game Over modal (extends .app-modal-* above) -----------------------
 
-.game-over-save {
-    margin-bottom: 18px;
-    padding-bottom: 18px;
-    border-bottom: 1px solid fade(@text, 15%);
+.game-over-summary {
+    font-family: 'Turret Road', sans-serif;
+    font-weight: 200;
+    font-size: 16px;
+    line-height: 1.65;
+    text-align: center;
+    margin: 0 0 28px;
+    color: fade(@text, 82%);
 
-    label {
-        .form-label-style();
-        display: block;
-        margin-bottom: 8px;
+    .game-over-value {
+        font-weight: 800;
+        font-size: 18px;
+
+        &.game-over-value-pattern {
+            color: @orb-top;
+        }
+
+        &.game-over-value-score {
+            color: @orb-pink;
+        }
+
+        &.game-over-value-difficulty {
+            color: @orb-picker;
+        }
     }
 }
 
-.game-over-save-row {
-    display: flex;
-    gap: 10px;
+
+.game-over-save {
+    label {
+        .form-label-style();
+        margin-bottom: 8px;
+    }
 
     #game-over-name-input {
-        flex: 1;
-        min-width: 0;
+        width: 100%;
         box-sizing: border-box;
         font-size: 15px;
-        font-family: 'Asimovian', monospace;
-        letter-spacing: 0.2px;
+        font-family: 'Turret Road', monospace;
+        letter-spacing: 0.3px;
         padding: 9px 10px;
+        margin-bottom: 14px;
         border: 1px solid #3a3a52;
         border-radius: @border-radius-small;
         background: transparent;
@@ -1353,12 +1378,6 @@ body.mode-competitive {
         &:focus {
             filter: brightness(1.4);
         }
-    }
-
-    .action-button {
-        flex-shrink: 0;
-        padding-left: 14px;
-        .action-button-muted();
     }
 }
 

@@ -1,12 +1,16 @@
 {{!-- Base modal shell (see .app-modal-overlay/.app-modal-* in index.less).
      Per-modal templates "inherit" from this by invoking it as a partial
      block - whatever's between their {{#> modal}}...{{/modal}} tags fills
-     the {{> @partial-block}} slot below (e.g. see credits-modal.handlebars). --}}
+     the {{> @partial-block}} slot below (e.g. see credits-modal.handlebars).
+     Pass hideClose=true when the modal has no dismiss affordance (e.g. Game
+     Over - see game-over-modal.handlebars). --}}
 <div id="{{overlayId}}" class="app-modal-overlay hidden">
     <div id="{{modalId}}" class="app-modal">
+        {{#unless hideClose}}
         <button type="button" class="icon-button app-modal-close" title="Close">
             <span class="material-symbols-outlined" aria-hidden="true">close</span>
         </button>
+        {{/unless}}
         <h2 class="app-modal-title">{{title}}</h2>
         <div class="app-modal-body">
             {{> @partial-block }}

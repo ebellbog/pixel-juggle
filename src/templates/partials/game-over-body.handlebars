@@ -1,15 +1,12 @@
-{{!-- Game Over modal body - a name-entry row (only while this run hasn't
-     been saved yet, see `pendingScore`/App.handleGameOver) sitting above the
-     same score-table the Scores modal uses, so a finished competitive run
-     can be named and saved before it takes its place - highlighted - among
-     everyone else's history (see App.saveGameOverScore). --}}
-{{#if pendingScore}}
+{{!-- Game Over modal body (see #game-over-modal in index.less) - a run
+     summary plus a stacked name/save form. Unlike the Scores modal, no
+     table here; saving is the only way out (see game-over-modal.handlebars's
+     hideClose and App.saveGameOverScore). --}}
+<p class="game-over-summary">
+    You juggled <strong class="game-over-value game-over-value-pattern">{{pattern}}</strong> for <strong class="game-over-value game-over-value-score">{{score}}</strong> good throws, at the <strong class="game-over-value game-over-value-difficulty">{{difficulty}}</strong> difficulty level. <strong>Thanks for playing!</strong>
+</p>
 <div class="game-over-save">
-    <label for="game-over-name-input">Save your score as:</label>
-    <div class="game-over-save-row">
-        <input type="text" id="game-over-name-input" maxlength="24" placeholder="Player name" autocomplete="off">
-        <button type="button" class="action-button" data-action="game-over-save">Save score</button>
-    </div>
+    <label for="game-over-name-input">Save score as:</label>
+    <input type="text" id="game-over-name-input" maxlength="24" placeholder="Player" autocomplete="off">
+    <button type="button" class="action-button" data-action="game-over-save">Save</button>
 </div>
-{{/if}}
-{{> score-table scores=scores}}

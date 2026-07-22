@@ -41,9 +41,8 @@ function sortLeaderboardScores(scores) {
 /**
  * Sorts `scores` and, if `highlightId` matches one of them, tags that entry
  * with `highlighted: true` for the score-table partial to mark (see
- * .leaderboard-row-highlight in index.less) - used both by the Scores modal
- * (never highlights anything) and the Game Over modal (highlights the run
- * that was just saved - see saveGameOverScore).
+ * .leaderboard-row-highlight in index.less) - used by the Scores modal when
+ * reopening with a `highlightId` (not currently used by Game Over).
  */
 function buildScoreTableData(scores, { highlightId = null } = {}) {
     return sortLeaderboardScores(scores).map((entry) => (
@@ -57,7 +56,7 @@ function buildScoreTableData(scores, { highlightId = null } = {}) {
 // score-table.handlebars) - openContentModal sorts/highlights `data.scores`
 // for these before handing off to their body template, rather than every
 // other content modal's plain pass-through (see there).
-const SCORE_TABLE_OVERLAYS = new Set(['leaderboard-overlay', 'game-over-overlay']);
+const SCORE_TABLE_OVERLAYS = new Set(['leaderboard-overlay']);
 
 // Rendered into #app on startup (see App.renderContentModals) - each is a
 // thin Handlebars partial block "inheriting" the shared shell in
@@ -72,7 +71,7 @@ const CONTENT_MODAL_TEMPLATES = [
     controlsModalTemplate,
     siteswapBasicsModalTemplate,
     () => leaderboardModalTemplate({ scores: [] }),
-    () => gameOverModalTemplate({ scores: [], pendingScore: null }),
+    () => gameOverModalTemplate({ pattern: '', score: 0, difficulty: '' }),
 ];
 
 // overlayId -> template for modals whose *body* needs re-rendering with
@@ -375,9 +374,8 @@ export default class App {
         this.bindContentModalEvents();
         // 'R' restarts an active demo/game from the keyboard, same as the
         // button (see restart()) - only while one is actually running, and
-        // only when the siteswap input isn't focused, so it doesn't hijack
-        // someone typing a pattern that happens to contain the letter 'r'
-        // (e.g. hex digits above 9).
+        // not while the player is typing in a text field (siteswap on the
+        // menu, or a name on the Game Over modal).
         $(window).on('keydown', (event) => {
             if (event.repeat) return;
             if (event.key.toLowerCase() !== 'r') return;
@@ -385,6 +383,7 @@ export default class App {
             // alone - only a bare 'r' press restarts.
             if (event.ctrlKey || event.metaKey || event.altKey) return;
             if (!this.game && !this.simulator) return;
+            if (!$('#game-over-overlay').hasClass('hidden')) return;
             if (document.activeElement === this.$input[0]) return;
             event.preventDefault();
             this.restart();
@@ -434,15 +433,18 @@ export default class App {
             const $overlay = $(overlay);
             $overlay.find('.app-modal-close').on('click', () => this.closeContentModal($overlay));
             $overlay.on('click', (event) => {
+                // Game Over has no close affordance - saving is the only way
+                // out (see game-over-modal.handlebars's hideClose).
+                if ($overlay.is('#game-over-overlay')) return;
                 if (event.target === overlay) this.closeContentModal($overlay);
             });
         });
         this.$creditsLink.on('click', () => this.openContentModal('credits-overlay'));
 
-        // Delegated (not bound directly to the button) since both overlays'
-        // .app-modal-body is replaced wholesale on every re-render (see
-        // openContentModal) - a direct binding would go stale the moment
-        // either modal is reopened.
+        // Delegated (not bound directly to the button) since the leaderboard
+        // overlay's .app-modal-body is replaced wholesale on every re-render
+        // (see openContentModal) - a direct binding would go stale the
+        // moment it's reopened.
         $('#leaderboard-overlay').on('click', '[data-action="leaderboard-reset"]', () => {
             this.scores.resetAll();
             this.openContentModal('leaderboard-overlay', { scores: this.scores.getAll() });
@@ -456,14 +458,12 @@ export default class App {
     /**
      * Opens a text-content modal. If `data` is passed and the overlay has a
      * matching entry in CONTENT_MODAL_BODY_TEMPLATES, its .app-modal-body is
-     * re-rendered with that data first - e.g. the leaderboard/game-over
-     * modals passing fresh `{ scores }` each time they're reopened, rather
-     * than only ever showing whatever they were first rendered with at
-     * startup (see CONTENT_MODAL_TEMPLATES). Modals with no such entry
-     * (credits, controls, siteswap-basics) just ignore `data` and show
-     * as-is. `data.highlightId` (score-table overlays only) both flags a
-     * row for score-table.handlebars to mark and, once rendered, gets
-     * scrolled into view (see scrollToHighlightedScoreRow).
+     * re-rendered with that data first - e.g. the leaderboard passing fresh
+     * `{ scores }` each time it's reopened (see CONTENT_MODAL_TEMPLATES).
+     * Modals with no such entry (credits, controls, siteswap-basics) just
+     * ignore `data` and show as-is. Leaderboard-only: `data.highlightId`
+     * flags a row for score-table.handlebars to mark and scrolls it into
+     * view (see scrollToHighlightedScoreRow).
      */
     openContentModal(overlayId, data) {
         const bodyTemplate = CONTENT_MODAL_BODY_TEMPLATES[overlayId];
@@ -490,15 +490,16 @@ export default class App {
         // The Game Over modal (see handleGameOver) is shown "in place",
         // straight over gameplay's own last (frozen) frame, rather than
         // after already returning to the menu underneath - so the actual
-        // return trip only happens once the player's done with it, whether
-        // they saved their score or just closed it.
+        // return trip to the menu happens once it's dismissed (see
+        // returnToMenuAfterGameOver).
         if ($overlay.is('#game-over-overlay')) this.returnToMenuAfterGameOver();
     }
 
-    /** Closes whichever text-content modal is open, if any. Returns true if one was closed. */
+    /** Closes whichever text-content modal is open, if any. Returns true if one was closed. Game Over is excluded - it has no dismiss affordance (see game-over-modal.handlebars). */
     closeOpenContentModal() {
         const $open = this.$contentModalOverlays.not('.hidden').first();
         if (!$open.length) return false;
+        if ($open.is('#game-over-overlay')) return false;
         this.closeContentModal($open);
         return true;
     }
@@ -578,7 +579,14 @@ export default class App {
     setMode(mode, { competitive = false } = {}) {
         const leavingMenu = this.mode === 'menu' && mode !== 'menu';
         this.mode = mode;
-        this.$body.attr('class', mode ? `mode-${mode}${competitive ? ' mode-competitive' : ''}` : '');
+        // Built up rather than a `mode ? ... : ''` one-liner - competitive
+        // needs to survive mode: null too (see returnToMenuAfterGameOver's
+        // fade-to-black), which a short-circuiting ternary on `mode` alone
+        // would silently drop regardless of what was passed for it.
+        const classes = [];
+        if (mode) classes.push(`mode-${mode}`);
+        if (competitive) classes.push('mode-competitive');
+        this.$body.attr('class', classes.join(' '));
         if (mode === 'menu') {
             this.menuOrbAnimation.start();
         } else if (leavingMenu) {
@@ -937,43 +945,54 @@ export default class App {
      * menu underneath it (see closeContentModal/returnToMenuAfterGameOver
      * for that trip, deferred until the player's actually done with this
      * modal). The score itself isn't saved yet - see
-     * saveGameOverScore/game-over-body.handlebars's name field - so
-     * closing this modal without saving simply discards it.
+     * saveGameOverScore/game-over-body.handlebars's name field - saving is
+     * the only way out (see game-over-modal.handlebars's hideClose).
      */
     handleGameOver({ score, difficulty, pattern }) {
         this.pendingGameOverScore = { score, difficulty, pattern };
-        this.openContentModal('game-over-overlay', {
-            scores: this.scores.getAll(),
-            pendingScore: this.pendingGameOverScore,
-        });
+        this.openContentModal('game-over-overlay', { pattern, score, difficulty });
+        requestAnimationFrame(() => $('#game-over-name-input').trigger('focus'));
     }
 
-    /** Runs stop()'s own staged fade-to-black-then-menu transition once the Game Over modal (see handleGameOver) has actually been dismissed. */
+    /**
+     * Runs stop()'s own fade-to-black-then-menu transition once the Game
+     * Over modal (see handleGameOver) has actually been dismissed. The
+     * modal (already fading itself out via closeContentModal's addClass
+     * ('hidden')) and the frozen gameplay screen underneath it fade out
+     * together, rather than staging one after the other - its backdrop
+     * already fully covers that frozen frame for as long as it's up
+     * anyway, so there's nothing to see (or pop) either way. Keeps
+     * mode-competitive on through the fade, or #practice-stat-group's
+     * streak/best would flash back into view the instant that class
+     * would otherwise drop mid-fade (see body.mode-competitive in
+     * index.less).
+     */
     returnToMenuAfterGameOver() {
         if (this.mode !== 'game') return; // Already left - e.g. the modal somehow got closed twice.
 
         const stopToken = this.startToken;
-        this.setMode(null);
+        const competitive = Boolean(this.game && this.game.isCompetitive);
+        this.setMode(null, { competitive });
+
         waitMs(SCREEN_FADE_MS).then(() => {
             if (stopToken !== this.startToken) return;
 
-            this.clearSession();
+            // Don't blank the canvas until gameplay's fade is fully done and
+            // the menu layer has taken over (see clearSession's clearCanvas).
+            this.clearSession({ clearCanvas: false });
             this.setPickerPanel(PICKER_PANELS[0], { instant: true });
             this.setMode('menu');
+            this.renderer.draw({ balls: [] });
         });
     }
 
-    /** Commits the just-finished competitive run (see handleGameOver) under whatever name was entered, then re-renders the modal with it saved, sorted, and highlighted. */
+    /** Commits the just-finished competitive run (see handleGameOver), then closes the modal and returns to the menu. */
     saveGameOverScore() {
         if (!this.pendingGameOverScore) return;
         const name = $('#game-over-name-input').val();
-        const entry = this.scores.add({ ...this.pendingGameOverScore, player: name });
+        this.scores.add({ ...this.pendingGameOverScore, player: name });
         this.pendingGameOverScore = null;
-        this.openContentModal('game-over-overlay', {
-            scores: this.scores.getAll(),
-            pendingScore: null,
-            highlightId: entry.id,
-        });
+        this.closeContentModal($('#game-over-overlay'));
     }
 
     /**
@@ -1003,8 +1022,8 @@ export default class App {
         }
     }
 
-    /** Tears down any running demo/game and clears audio/canvas, without changing menu mode or picker state. */
-    clearSession() {
+    /** Tears down any running demo/game and clears audio/canvas, without changing menu mode or picker state. Pass clearCanvas: false when the gameplay layer may still be finishing its own fade-out (see returnToMenuAfterGameOver). */
+    clearSession({ clearCanvas = true } = {}) {
         // Invalidates any startDemo/startGame still waiting on a transition
         // or soundtrack.resume() (see there).
         this.startToken++;
@@ -1018,7 +1037,7 @@ export default class App {
             this.game = null;
         }
         this.soundtrack.stopAll();
-        this.renderer.draw({ balls: [] });
+        if (clearCanvas) this.renderer.draw({ balls: [] });
     }
 
     stop({ animated = true } = {}) {

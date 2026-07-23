@@ -1,4 +1,12 @@
 import FluidSimulation from './FluidSimulation.js';
+import { DEFAULT_KEY_BINDINGS } from './KeyboardInput.js';
+
+/** Maps a binding key to the glyph shown in Keycaps font on the wedges. */
+function formatKeycapLabel(key) {
+    if (key === ',') return '<';
+    if (key === '.') return '>';
+    return key.toUpperCase();
+}
 
 // A soft, colored background wash driven by the balls' own motion - either
 // a real GPU fluid simulation (see FluidSimulation.js) if this device
@@ -603,7 +611,11 @@ export default class Renderer {
      * ball's color once there's one to throw - letting the player judge
      * whether (and which ball) pressing now would actually launch, which
      * matters most for a ball that's still mid-flight toward this hand.
-     * "LEFT HAND" / "RIGHT HAND" labels sit just above the outermost ring.
+     * "LEFT HAND" / "RIGHT HAND" labels sit just above the outermost ring
+     * when uiLabelHands is on; height numbers when uiLabelHeights is on;
+     * keycap labels (Keycaps font, uiLabelHotkeys) sit just outside each
+     * cross/self wedge half at the same angular position as the height
+     * numbers.
      *
      * Sized in fixed screen pixels rather than world units, on purpose -
      * like the beat bar, this is HUD, not part of the simulated scene.
@@ -645,6 +657,10 @@ export default class Renderer {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.font = '16px "Asimovian", monospace';
+
+        const showHeights = this.settings?.get('uiLabelHeights') !== 'off';
+        const showHands = this.settings?.get('uiLabelHands') !== 'off';
+        const showHotkeys = this.settings?.get('uiLabelHotkeys') === 'on';
 
         for (const side of ['cross', 'self']) {
             const heights = side === 'cross' ? crossHeights : selfHeights;
@@ -692,25 +708,44 @@ export default class Renderer {
                 } else {
                     ctx.fillStyle = '#fff';
                 }
-                const label = sync && side === 'cross' ? `${heights[ring]}x` : String(heights[ring]);
+                if (showHeights) {
+                    const label = sync && side === 'cross' ? `${heights[ring]}x` : String(heights[ring]);
+                    ctx.fillText(
+                        label,
+                        cx + Math.cos(midAngle) * midR,
+                        cy + Math.sin(midAngle) * midR,
+                    );
+                }
+            }
+
+            if (showHotkeys) {
+                const key = DEFAULT_KEY_BINDINGS[hand][side];
+                const hotkeyAngle = (startAngle + endAngle) / 2;
+                const hotkeyR = outerRadius + ringThickness / 1.75; // Just a little farther away from the outer radius
+                ctx.font = '24px "Keycaps", monospace';
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
                 ctx.fillText(
-                    label,
-                    cx + Math.cos(midAngle) * midR,
-                    cy + Math.sin(midAngle) * midR,
+                    formatKeycapLabel(key),
+                    cx + Math.cos(hotkeyAngle) * hotkeyR,
+                    cy + Math.sin(hotkeyAngle) * hotkeyR,
                 );
+                ctx.font = '16px "Asimovian", monospace';
             }
         }
 
-        // Keep in sync with .ui-label-style() in index.less.
-        ctx.font = '400 15px "Turret Road", sans-serif';
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(
-            hand === 'L' ? 'LEFT HAND' : 'RIGHT HAND',
-            cx,
-            cy - outerRadius - 10,
-        );
+        if (showHands) {
+            const handLabelOffset = showHotkeys ? 34 : 10;
+            // Keep in sync with .ui-label-style() in index.less.
+            ctx.font = '400 15px "Turret Road", sans-serif';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(
+                hand === 'L' ? 'LEFT HAND' : 'RIGHT HAND',
+                cx,
+                cy - outerRadius - handLabelOffset,
+            );
+        }
 
         if (target) {
             const TARGET_FILL_ALPHA = 0.32;

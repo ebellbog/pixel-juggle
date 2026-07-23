@@ -20,6 +20,10 @@ export const DEFAULT_SETTINGS = {
     soundPercussion: 'on',
     soundThrowTones: 'on',
     soundButtons: 'on',
+    // On/off toggles for in-game HUD labels (see Renderer.drawThrowHeightWedge).
+    uiLabelHands: 'on',
+    uiLabelHeights: 'on',
+    uiLabelHotkeys: 'off',
 };
 
 const VALID_VALUES = {
@@ -28,6 +32,9 @@ const VALID_VALUES = {
     soundPercussion: ['on', 'off'],
     soundThrowTones: ['on', 'off'],
     soundButtons: ['on', 'off'],
+    uiLabelHands: ['on', 'off'],
+    uiLabelHeights: ['on', 'off'],
+    uiLabelHotkeys: ['on', 'off'],
 };
 
 const LEGACY_MUTED_STORAGE_KEY = 'pixel-juggle-muted';

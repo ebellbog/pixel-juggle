@@ -977,6 +977,7 @@ export default class Game {
             carryDuration: p.carryDuration,
             carryLift: p.carryLift,
             incomingVelocity,
+            height,
         });
 
         this.inFlight.push({ flight, ball, destHand, sourceHand: hand });

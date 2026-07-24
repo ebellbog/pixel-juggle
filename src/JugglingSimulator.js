@@ -324,6 +324,14 @@ export default class JugglingSimulator {
      * than a single dot right at this instant), both to thicken the trail a
      * bit and to fill in, rather than skip past, whatever ground was
      * covered on the frames in between.
+     *
+     * A held "2" (see Throw.isHold) is skipped here entirely - it's not
+     * really flying, so tracing a dotted copy of its own little wobble
+     * circle would just double up (and muddy) a motion the hold circle
+     * itself already reads clearly on its own. lastTrailSampleTime still
+     * advances though, so once the ball is genuinely thrown again, its
+     * trail resumes from a tight, recent gap instead of stretching a stale
+     * one all the way back across the whole hold.
      */
     recordTrails() {
         this.frameCount += 1;
@@ -331,6 +339,10 @@ export default class JugglingSimulator {
         if (this.frameCount % frameSkip === 0) {
             for (const entry of this.inFlight) {
                 const ball = entry.ball;
+                if (entry.flight.isHold) {
+                    ball.lastTrailSampleTime = this.time;
+                    continue;
+                }
                 const from = Number.isFinite(ball.lastTrailSampleTime) ? ball.lastTrailSampleTime : this.time;
                 for (let i = 1; i <= DOTS_PER_RECORDED_FRAME; i++) {
                     const t = from + (this.time - from) * (i / DOTS_PER_RECORDED_FRAME);
@@ -418,6 +430,7 @@ export default class JugglingSimulator {
             carryDuration: this.carryDuration,
             carryLift: this.carryLift,
             incomingVelocity,
+            height: throwSpec.height,
         });
         // Governs how long this ball's trail stays visible, including after
         // it lands - re-set on every throw so a lazy high throw still gets a

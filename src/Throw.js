@@ -1,10 +1,19 @@
+// A siteswap "2" is traditionally not a throw at all, but a hold - the hand
+// simply idles the ball through the beat rather than releasing it. See
+// isHold below for how a Throw recognizes this case; this constant just
+// tunes how visibly it wobbles. Kept relative to carryLift (rather than an
+// absolute size) so it scales naturally with however cramped/wide the
+// hands' stance is for the current pattern.
+const HOLD_WOBBLE_RADIUS_FACTOR = .7;
+
 /**
  * A single ball's journey from one catch to the next, in world coordinates
  * (y is up). Kept as pure geometry - it knows nothing about beats, hands, or
  * notation - so it works equally well for scripted pattern throws and, later,
  * continuous player-driven throws.
  *
- * Two phases, chosen to be honest about what physics actually governs each:
+ * Three phases, chosen to be honest about what physics (or, for a hold,
+ * stagecraft) actually governs each:
  *  1. Carry: the ball is still in the hand. On catching, the hand recoils
  *     downward slightly under the ball's weight, then scoops it up and inward
  *     toward a "release" spot, ending a bit above resting height as it
@@ -21,6 +30,11 @@
  *     since the release point sits a bit higher than the catch point, just
  *     like a real toss - but still just one continuous quadratic curve, with
  *     no mid-air reversals.
+ *  3. Hold: only for a height-2 self "throw" (see isHold) - the ball never
+ *     leaves the hand, so carry/flight don't apply at all. Instead it traces
+ *     one small circle over the throw's whole duration, starting and ending
+ *     exactly at the resting spot, as if the hand were rotating its wrist in
+ *     place rather than throwing - see holdPositionAt.
  * The flight starts exactly where the carry ends, at exactly the velocity the
  * carry was aiming for, so the whole path is continuous in both position and
  * velocity.
@@ -38,6 +52,11 @@ export default class Throw {
         carryDuration,
         carryLift,
         incomingVelocity = { x: 0, y: 0 },
+        // The siteswap height (in beats) this throw represents, if any -
+        // only consulted to recognize a height-2 hold (see isHold); every
+        // other computation here is height-agnostic geometry derived from
+        // the params above.
+        height = null,
     }) {
         this.ball = ball;
         this.startTime = startTime;
@@ -52,6 +71,22 @@ export default class Throw {
         // Velocity the ball actually had the instant it was caught here (from
         // whatever threw it - or {0, 0} if it just spawned into an idle hand).
         this.incomingVelocity = incomingVelocity;
+        this.height = height;
+    }
+
+    /**
+     * A plain "2" is a hold, not a throw - but "2x" (or any other height
+     * thrown to the other hand) is a genuine crossing throw and must still
+     * fly there. Rather than thread a separate crossing flag through just
+     * for this, lean on geometry that's already unambiguous: a self throw's
+     * land spot is always the same hand's own catch spot (see
+     * JugglingSimulator/Game's landX, always the *destination* hand's outer
+     * position), so catchX === landX already means "comes back to the same
+     * hand" - exactly what a hold requires - with no separate flag to keep
+     * in sync.
+     */
+    get isHold() {
+        return this.height === 2 && this.catchX === this.landX;
     }
 
     get duration() {
@@ -79,9 +114,20 @@ export default class Throw {
         };
     }
 
-    /** Velocity (world units/sec) the ball arrives at the end of this flight -
-     * i.e. what the next carry should treat as its incoming velocity. */
+    /**
+     * Velocity (world units/sec) the ball arrives at the end of this flight -
+     * i.e. what the next carry should treat as its incoming velocity. For a
+     * hold, this is deliberately *not* independently invented (an earlier
+     * version borrowed a height-1 throw's landing speed here, which visibly
+     * kinked the join - the circle's own actual motion was going one way,
+     * but the next carry's tangent assumed a completely different one) -
+     * instead it's the exact analytic derivative of holdPositionAt at
+     * elapsed = duration (see holdEndVelocity), the same "velocity is
+     * always literally the derivative of position" invariant every other
+     * throw here already relies on for a seamless join.
+     */
     get landVelocity() {
+        if (this.isHold) return this.holdEndVelocity;
         const fd = this.flightDuration;
         if (fd <= 0) return { x: 0, y: 0 };
         return {
@@ -92,6 +138,8 @@ export default class Throw {
 
     positionAt(time) {
         const elapsed = Math.min(Math.max(time - this.startTime, 0), this.duration);
+
+        if (this.isHold) return this.holdPositionAt(elapsed);
 
         if (elapsed <= this.carryDuration) {
             const p = this.carryDuration > 0 ? elapsed / this.carryDuration : 1;
@@ -107,6 +155,69 @@ export default class Throw {
         // as a real ball released from one height and caught at another.
         const y = this.releaseY + (this.baseY - this.releaseY) * p + this.arcPeak * 4 * p * (1 - p);
         return { x, y };
+    }
+
+    /** Radius and left/right-mirrored sign shared by holdPositionAt and
+     * holdEndVelocity, so the two stay in lockstep by construction rather
+     * than by keeping two copies of the same numbers in sync by hand. */
+    get holdGeometry() {
+        return {
+            radius: this.carryLift * HOLD_WOBBLE_RADIUS_FACTOR,
+            side: this.catchX >= 0 ? 1 : -1,
+        };
+    }
+
+    /**
+     * A held "2": one small circle traced over the whole throw, rather than
+     * carry-then-flight, so it reads as "still in hand, wrist rotating in
+     * time with the beat" instead of a genuine parabola - while still a
+     * player action (see ThrowHeight/Game, unchanged: a 2 is still charged
+     * and released like any other height). Starts and ends exactly at
+     * (catchX, baseY) - the resting spot - so there's no join to smooth
+     * against whatever throw precedes or follows it. Bulges away from
+     * center (rather than always toward +x) so it reads the same,
+     * mirrored, from either hand. Rotation is reversed from a naive
+     * math-y-up circle because the renderer flips y for screen space -
+     * right-hand holds read clockwise, left-hand counter-clockwise.
+     *
+     * Swept out via an ease-*out* cubic (1 - (1-p)^3) rather than plain p:
+     * a constant angular speed matches position and velocity at the join
+     * with whatever throw follows (see landVelocity), but still leaves a
+     * sudden kink in *acceleration* right there - the circle's own
+     * constant centripetal pull switching abruptly to the next throw's
+     * very different one. This cubic's first *and* second derivatives are
+     * both exactly zero at p=1 (the minimum degree for which that's true),
+     * so angular velocity and acceleration - and therefore the ball's
+     * actual screen velocity and acceleration - ease all the way to a
+     * standstill right as the loop closes, rather than cutting off
+     * mid-swing. Deliberately *not* eased at p=0 too (unlike a plain
+     * smoothstep/smootherstep, which would ease in from a standstill
+     * there as well) - nothing about entering a hold needs to match a
+     * standstill, and easing there would just make it feel sluggish to
+     * begin.
+     */
+    holdPositionAt(elapsed) {
+        const p = this.duration > 0 ? elapsed / this.duration : 0;
+        const eased = 1 - (1 - p) * (1 - p) * (1 - p); // ease-out cubic
+        const angle = -eased * Math.PI * 2;
+        const { radius, side } = this.holdGeometry;
+        return {
+            x: this.catchX + side * radius * Math.sin(angle),
+            y: this.baseY + radius * (1 - Math.cos(angle)),
+        };
+    }
+
+    /**
+     * The tangent holdPositionAt ends on (elapsed = duration). Exactly
+     * {0, 0}, not merely a small number: the ease-out in holdPositionAt
+     * drives angular velocity itself to zero right at p=1, so there's no
+     * leftover "spin" to hand off at all - the next carry's incoming
+     * tangent can simply be zero, same as any other throw's first-ever
+     * launch from a ball that's never been thrown (see the constructor's
+     * incomingVelocity default).
+     */
+    get holdEndVelocity() {
+        return { x: 0, y: 0 };
     }
 
     /**

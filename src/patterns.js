@@ -25,6 +25,7 @@ export const PATTERN_GROUPS = [
         patterns: [
             { value: '(4,2x)*', name: 'Box' },
             { value: '534', name: '534' },
+            { value: '645', name: '645' },
             { value: '97531', name: '97531' },
         ],
     },

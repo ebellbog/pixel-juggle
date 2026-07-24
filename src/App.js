@@ -9,11 +9,13 @@ import Scores from './Scores.js';
 import PatternSelection from './PatternSelection.js';
 import MenuOrbAnimation from './MenuOrbAnimation.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
+import { buildControlsModalData } from './KeyboardInput.js';
 import creditsModalTemplate from './templates/credits-modal.handlebars';
 import controlsModalTemplate from './templates/controls-modal.handlebars';
 import siteswapBasicsModalTemplate from './templates/siteswap-basics-modal.handlebars';
 import leaderboardModalTemplate from './templates/leaderboard-modal.handlebars';
 import leaderboardTableTemplate from './templates/partials/leaderboard-table.handlebars';
+import controlsBodyTemplate from './templates/partials/controls-body.handlebars';
 import gameOverModalTemplate from './templates/game-over-modal.handlebars';
 import gameOverBodyTemplate from './templates/partials/game-over-body.handlebars';
 
@@ -68,7 +70,7 @@ const SCORE_TABLE_OVERLAYS = new Set(['leaderboard-overlay']);
 // revealing them (see CONTENT_MODAL_BODY_TEMPLATES).
 const CONTENT_MODAL_TEMPLATES = [
     creditsModalTemplate,
-    controlsModalTemplate,
+    () => controlsModalTemplate(buildControlsModalData()),
     siteswapBasicsModalTemplate,
     () => leaderboardModalTemplate({ scores: [] }),
     () => gameOverModalTemplate({ pattern: '', score: 0, difficulty: '' }),
@@ -79,6 +81,7 @@ const CONTENT_MODAL_TEMPLATES = [
 // than only ever being rendered once at startup like the plain entries in
 // CONTENT_MODAL_TEMPLATES above.
 const CONTENT_MODAL_BODY_TEMPLATES = {
+    'controls-overlay': controlsBodyTemplate,
     'leaderboard-overlay': leaderboardTableTemplate,
     'game-over-overlay': gameOverBodyTemplate,
 };
@@ -460,8 +463,9 @@ export default class App {
      * matching entry in CONTENT_MODAL_BODY_TEMPLATES, its .app-modal-body is
      * re-rendered with that data first - e.g. the leaderboard passing fresh
      * `{ scores }` each time it's reopened (see CONTENT_MODAL_TEMPLATES).
-     * Modals with no such entry (credits, controls, siteswap-basics) just
-     * ignore `data` and show as-is. Leaderboard-only: `data.highlightId`
+     * Modals with no such entry (credits, siteswap-basics) just ignore
+     * `data` and show as-is. Controls passes fresh bindings each open (see
+     * buildControlsModalData). Leaderboard-only: `data.highlightId`
      * flags a row for score-table.handlebars to mark and scrolls it into
      * view (see scrollToHighlightedScoreRow).
      */
@@ -656,7 +660,9 @@ export default class App {
                 console.log('Starting interactive tutorial');
                 break;
             case 'tutorial-controls':
-                this.openContentModal('controls-overlay');
+                this.openContentModal('controls-overlay', buildControlsModalData(undefined, {
+                    inputType: this.settings.get('inputType'),
+                }));
                 break;
             case 'tutorial-siteswap-basics':
                 this.openContentModal('siteswap-basics-overlay');

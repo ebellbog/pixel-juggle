@@ -1,12 +1,5 @@
 import FluidSimulation from './FluidSimulation.js';
-import { DEFAULT_KEY_BINDINGS } from './KeyboardInput.js';
-
-/** Maps a binding key to the glyph shown in Keycaps font on the wedges. */
-function formatKeycapLabel(key) {
-    if (key === ',') return '<';
-    if (key === '.') return '>';
-    return key.toUpperCase();
-}
+import { DEFAULT_KEY_BINDINGS, formatKeycapLabel } from './KeyboardInput.js';
 
 // A soft, colored background wash driven by the balls' own motion - either
 // a real GPU fluid simulation (see FluidSimulation.js) if this device

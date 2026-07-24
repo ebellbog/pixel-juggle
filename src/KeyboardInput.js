@@ -7,6 +7,28 @@ export const DEFAULT_KEY_BINDINGS = {
     R: { cross: ',', self: '.' },
 };
 
+/** Maps a binding key to the glyph shown in Keycaps font (see Renderer, controls modal). */
+export function formatKeycapLabel(key) {
+    if (key === ',') return '<';
+    if (key === '.') return '>';
+    return key.toUpperCase();
+}
+
+/** Shape passed to the controls modal body template (see controls-body.handlebars). */
+export function buildControlsModalData(bindings = DEFAULT_KEY_BINDINGS, { inputType = 'hold' } = {}) {
+    const heightControlPhrase = inputType === 'tap'
+        ? 'tap the key repeatedly'
+        : 'hold the key down longer';
+
+    return {
+        leftSelf: formatKeycapLabel(bindings.L.self),
+        leftCross: formatKeycapLabel(bindings.L.cross),
+        rightCross: formatKeycapLabel(bindings.R.cross),
+        rightSelf: formatKeycapLabel(bindings.R.self),
+        heightControlPhrase,
+    };
+}
+
 /**
  * Translates raw keydown/keyup events into hand-throw intents - plain
  * { hand: 'L'|'R', crossing: boolean } objects - the one shape every input

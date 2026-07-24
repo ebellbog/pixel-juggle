@@ -1213,6 +1213,73 @@ body.mode-competitive {
     margin: 26px auto 0;
 }
 
+// --- Controls modal (extends .app-modal-* above) -----------------------
+
+.keycap {
+    font-family: 'Keycaps', monospace;
+    font-size: 24px;
+    line-height: 1;
+    color: @text;
+}
+
+.controls-bindings-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+
+    th {
+        .ui-label-style();
+        font-size: 13px;
+        padding: 0 8px 14px;
+        text-align: center;
+        font-weight: 400;
+        border-bottom: 1px solid fade(@text, 18%);
+
+        & + th {
+            border-left: 1px solid fade(@text, 18%);
+        }
+    }
+
+    td {
+        padding: 0 8px;
+        text-align: center;
+        vertical-align: top;
+
+        &:nth-child(3) {
+            border-left: 1px solid fade(@text, 18%);
+        }
+    }
+
+    .controls-bindings-keys td {
+        padding: 10px 0;
+    }
+
+    .controls-bindings-labels td {
+        .form-label-style();
+        font-size: 12px;
+        line-height: 1.35;
+        padding-bottom: 0;
+    }
+}
+
+.app-modal-body .controls-description {
+    margin-top: 28px;
+    font-size: 14px;
+    font-family: 'Turret Road', sans-serif;
+    line-height: 1.3;
+    color: fade(@text, 72%);
+
+    .controls-settings-ref {
+        white-space: nowrap;
+        font-weight: 700;
+    }
+
+    .controls-settings-icon {
+        font-size: 16px;
+        vertical-align: -3px;
+    }
+}
+
 // --- Leaderboard modal (extends .app-modal-* above) ---------------------
 
 @leaderboard-table-max-height: 280px;

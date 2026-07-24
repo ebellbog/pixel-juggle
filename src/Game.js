@@ -175,15 +175,6 @@ export default class Game {
         // (this.period === siteswap.period already), so this comes out
         // to plain this.paths.length for them, same as before.
         this.groovePeriodThrows = this.paths.length / (this.period / siteswap.period);
-        // How many this.throwSequenceSteps positions forward lands on
-        // this same doubling's *other* phase - identical crossing/height
-        // sequence, opposite lead hand (e.g. 531's R5-L3-R1 vs. its
-        // L5-R3-L1). 0 for sync/even-period vanilla patterns, which never
-        // double in the first place and so only ever have the one phase.
-        // recordThrowSequenceOutcome uses this to let a recovery attempt
-        // lead with either hand, rather than only whichever one this
-        // pointer happened to freeze on when the preceding mismatch hit.
-        this.recoveryPhaseShift = this.groovePeriodThrows === this.paths.length ? 0 : this.groovePeriodThrows;
 
         // this.paths grouped by beat, so a synchronous pattern's beat-pairs
         // (both hands throwing at once - see SyncSiteswap) are tracked and
@@ -192,6 +183,29 @@ export default class Game {
         // degrades to the same one-at-a-time behavior as before (see
         // buildThrowSequenceSteps/recordThrowSequenceOutcome).
         this.throwSequenceSteps = this.buildThrowSequenceSteps();
+        // True for a doubled, odd-period vanilla pattern (see
+        // groovePeriodThrows above) - the only case where "starting over"
+        // is actually ambiguous as to which hand leads. recordThrow
+        // SequenceOutcome only bothers hunting through recoveryEntryIndices
+        // (below) when this is true; every other pattern already has a
+        // single unambiguous hand per notation position, so recovering
+        // "from the top" is just whatever this.throwSequenceIndex was
+        // already frozen on - no different from before today's fixes.
+        this.hasPhaseAmbiguity = this.groovePeriodThrows !== this.paths.length;
+        // Which this.throwSequenceSteps indices represent the pattern's
+        // own first notation value (e.g. 531's leading "5") - one per
+        // possible lead hand, since doubling (see above) gives each
+        // notation position two schedule slots, one per phase. Recovering
+        // from a mistake (see recordThrowSequenceOutcome) always means
+        // landing one of *these*, in whichever hand, never mind which
+        // step this.throwSequenceIndex actually happened to freeze on -
+        // real "starting over" always goes back to the pattern's own
+        // beginning, not wherever the mistake happened to interrupt it.
+        this.recoveryEntryIndices = this.hasPhaseAmbiguity
+            ? this.throwSequenceSteps
+                .map((step, index) => (step.beat % siteswap.period === 0 ? index : -1))
+                .filter((index) => index !== -1)
+            : [];
         // The two height "ladders" (crossing: odd, self: even) a held throw
         // can select from, capped at whatever this pattern's tallest throw
         // is - see ThrowHeight and this.charging below.
@@ -716,16 +730,18 @@ export default class Game {
      * the initial highlight just keeps waiting for them to get to it, rather
      * than hiding before they've had a real chance to start.
      *
-     * While recovering (throwSequenceHidden) from a doubled, odd-period
-     * pattern (see recoveryPhaseShift), a throw that doesn't match this
-     * frozen step but does match its other-phase mirror - same crossing/
-     * height, opposite hand - re-syncs the pointer onto that mirror
-     * instead of counting as yet another mismatch. Without this, recovery
-     * would only ever accept whichever hand this pointer happened to
-     * freeze on, silently wasting every attempt led with the other one
-     * until the player's own rhythm happened to land back on it - rather
-     * than the three (not six) clean 531 throws groovePeriodThrows
-     * promises, "starting with either hand."
+     * "Starting over" after a mistake always means the pattern's own first
+     * notation value (531's leading 5), in either hand - not wherever this
+     * pointer was actually left expecting next, which could just as
+     * easily be a mid-pattern step (3 or 1) if that's where the mistake
+     * happened to land. So the very first throw of a recovery attempt
+     * (this.throwSequenceStreak still at 0 - see below) for an
+     * ambiguous, doubled pattern (this.hasPhaseAmbiguity) only ever
+     * checks against this.recoveryEntryIndices, ignoring the frozen
+     * step/hand entirely; every throw after that first one lands back on
+     * the normal single-step check below, same as any other pattern,
+     * since by then this.throwSequenceIndex has already been resynced
+     * onto whichever entry point actually matched.
      *
      * Also drives the soundtrack's chord progression (see
      * soundtrackSuccessCount/Soundtrack.advancePeriod): every match nudges
@@ -736,25 +752,28 @@ export default class Game {
      */
     recordThrowSequenceOutcome(hand, crossing, height) {
         let stepIndex = this.throwSequenceIndex;
-        let step = this.throwSequenceSteps[stepIndex];
         let pending = this.throwSequencePending;
-        let expected = hand !== null ? step.entries.find((entry) => entry.hand === hand) : null;
-        let matched = expected
-            && pending.has(hand)
-            && expected.crossing === crossing
-            && expected.height === height;
+        let expected = null;
+        let matched = false;
 
-        if (!matched && hand !== null && this.throwSequenceHidden && this.recoveryPhaseShift) {
-            const mirrorIndex = (stepIndex + this.recoveryPhaseShift) % this.throwSequenceSteps.length;
-            const mirrorStep = this.throwSequenceSteps[mirrorIndex];
-            const mirrorExpected = mirrorStep.entries.find((entry) => entry.hand === hand);
-            if (mirrorExpected && mirrorExpected.crossing === crossing && mirrorExpected.height === height) {
-                stepIndex = mirrorIndex;
-                step = mirrorStep;
+        if (hand !== null && this.throwSequenceHidden && this.throwSequenceStreak === 0 && this.hasPhaseAmbiguity) {
+            const candidateIndex = this.recoveryEntryIndices.find((index) => this.throwSequenceSteps[index].entries.some(
+                (entry) => entry.hand === hand && entry.crossing === crossing && entry.height === height,
+            ));
+            if (candidateIndex !== undefined) {
+                stepIndex = candidateIndex;
+                const step = this.throwSequenceSteps[stepIndex];
                 pending = new Set(step.entries.map((entry) => entry.hand));
-                expected = mirrorExpected;
+                expected = step.entries.find((entry) => entry.hand === hand);
                 matched = true;
             }
+        } else {
+            const step = this.throwSequenceSteps[stepIndex];
+            expected = hand !== null ? step.entries.find((entry) => entry.hand === hand) : null;
+            matched = Boolean(expected)
+                && pending.has(hand)
+                && expected.crossing === crossing
+                && expected.height === height;
         }
 
         if (matched) {

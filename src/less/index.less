@@ -60,7 +60,7 @@
 
 @font-face {
     font-family: 'Keycaps';
-    src: url('../fonts/Keycaps.ttf');
+    src: url('../../fonts/Keycaps.ttf');
 }
 
 // Uppercase HUD labels (stat labels in #game-stats, "LEFT HAND" / "RIGHT
@@ -1410,14 +1410,14 @@ body.mode-competitive {
         background-color: fade(white, 4%);
     }
 
-    // A just-saved competitive run (see App.saveGameOverScore) - nested,
+    // A just-saved competitive run (see App.openScoresModal) - nested,
     // same specificity-over-nth-child reasoning as .leaderboard-empty
     // below, and placed after those rules so it wins on top of whichever
     // odd/even shade this row would otherwise get. Settles back to that
     // plain alternating shade once the highlight fades rather than staying
     // tinted forever.
     tr.leaderboard-row-highlight {
-        animation: leaderboard-row-highlight-fade 2.6s ease-out;
+        animation: leaderboard-row-highlight-fade 2.4s ease-out;
     }
 
     // Nested (not a standalone top-level rule) so this beats the plain
@@ -1433,7 +1433,7 @@ body.mode-competitive {
 
 @keyframes leaderboard-row-highlight-fade {
     0% {
-        background-color: fade(@orb-lime, 40%);
+        background-color: fade(@warning, 35%);
     }
 
     100% {
@@ -1582,3 +1582,5 @@ body.mode-competitive {
         transform: translateY(1px);
     }
 }
+
+@import 'mobile.less';

@@ -10,14 +10,14 @@ import PatternSelection from './PatternSelection.js';
 import MenuOrbAnimation from './MenuOrbAnimation.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 import { buildControlsModalData } from './KeyboardInput.js';
-import creditsModalTemplate from './templates/credits-modal.handlebars';
-import controlsModalTemplate from './templates/controls-modal.handlebars';
-import siteswapBasicsModalTemplate from './templates/siteswap-basics-modal.handlebars';
-import leaderboardModalTemplate from './templates/leaderboard-modal.handlebars';
-import leaderboardTableTemplate from './templates/partials/leaderboard-table.handlebars';
-import controlsBodyTemplate from './templates/partials/controls-body.handlebars';
-import gameOverModalTemplate from './templates/game-over-modal.handlebars';
-import gameOverBodyTemplate from './templates/partials/game-over-body.handlebars';
+import creditsModalTemplate from '../templates/credits-modal.handlebars';
+import controlsModalTemplate from '../templates/controls-modal.handlebars';
+import siteswapBasicsModalTemplate from '../templates/siteswap-basics-modal.handlebars';
+import leaderboardModalTemplate from '../templates/leaderboard-modal.handlebars';
+import leaderboardTableTemplate from '../templates/partials/leaderboard-table.handlebars';
+import controlsBodyTemplate from '../templates/partials/controls-body.handlebars';
+import gameOverModalTemplate from '../templates/game-over-modal.handlebars';
+import gameOverBodyTemplate from '../templates/partials/game-over-body.handlebars';
 
 // Lower sorts first - Harder > Normal > Easier (see sortLeaderboardScores).
 const LEADERBOARD_DIFFICULTY_ORDER = {
@@ -44,7 +44,7 @@ function sortLeaderboardScores(scores) {
  * Sorts `scores` and, if `highlightId` matches one of them, tags that entry
  * with `highlighted: true` for the score-table partial to mark (see
  * .leaderboard-row-highlight in index.less) - used by the Scores modal when
- * reopening with a `highlightId` (not currently used by Game Over).
+ * reopening after a score was saved this session (see openScoresModal).
  */
 function buildScoreTableData(scores, { highlightId = null } = {}) {
     return sortLeaderboardScores(scores).map((entry) => (
@@ -171,6 +171,9 @@ export default class App {
         // Competitive mode's score history (see Scores.js/handleGameOver) -
         // same read/write-through-localStorage shape as Settings above.
         this.scores = new Scores();
+        // Id of the last score saved this session — cleared once the Scores
+        // modal has been opened with it highlighted (see openScoresModal).
+        this.recentScoreHighlightId = null;
         // Title-screen pattern picker (see PatternSelection.js).
         this.patternSelection = new PatternSelection();
         this.renderer = new Renderer(this.canvas, { settings: this.settings });
@@ -450,11 +453,22 @@ export default class App {
         // moment it's reopened.
         $('#leaderboard-overlay').on('click', '[data-action="leaderboard-reset"]', () => {
             this.scores.resetAll();
-            this.openContentModal('leaderboard-overlay', { scores: this.scores.getAll() });
+            this.recentScoreHighlightId = null;
+            this.openScoresModal();
         });
         $('#game-over-overlay').on('click', '[data-action="game-over-save"]', () => this.saveGameOverScore());
         $('#game-over-overlay').on('keydown', '#game-over-name-input', (event) => {
             if (event.key === 'Enter') this.saveGameOverScore();
+        });
+    }
+
+    /** Opens the Scores modal, highlighting the last score saved this session (if any) with a one-time fade. */
+    openScoresModal() {
+        const highlightId = this.recentScoreHighlightId;
+        this.recentScoreHighlightId = null;
+        this.openContentModal('leaderboard-overlay', {
+            scores: this.scores.getAll(),
+            ...(highlightId != null ? { highlightId } : {}),
         });
     }
 
@@ -645,7 +659,7 @@ export default class App {
                 this.setPickerPanel('tutorial');
                 break;
             case 'leaderboard':
-                this.openContentModal('leaderboard-overlay', { scores: this.scores.getAll() });
+                this.openScoresModal();
                 break;
             case 'difficulty-easier':
                 this.startGame({ mode: 'competitive', difficulty: 'easier' });
@@ -996,7 +1010,8 @@ export default class App {
     saveGameOverScore() {
         if (!this.pendingGameOverScore) return;
         const name = $('#game-over-name-input').val();
-        this.scores.add({ ...this.pendingGameOverScore, player: name });
+        const entry = this.scores.add({ ...this.pendingGameOverScore, player: name });
+        this.recentScoreHighlightId = entry.id;
         this.pendingGameOverScore = null;
         this.closeContentModal($('#game-over-overlay'));
     }

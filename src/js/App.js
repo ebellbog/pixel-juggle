@@ -8,6 +8,7 @@ import Settings from './Settings.js';
 import Scores from './Scores.js';
 import PatternSelection from './PatternSelection.js';
 import MenuOrbAnimation from './MenuOrbAnimation.js';
+import { isMobileViewport } from './mobile.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 import { buildControlsModalData } from './KeyboardInput.js';
 import creditsModalTemplate from '../templates/credits-modal.handlebars';
@@ -365,6 +366,7 @@ export default class App {
             this.handleMenuAction($button.attr('data-action'));
         });
         this.$pickerBackButton.on('click', () => this.setPickerPanel('main'));
+        this.bindPickerBackSwipe();
         this.$stopButton.on('click', () => this.stop());
         this.$restartButton.on('click', () => this.restart());
         this.$muteButton.on('click', () => {
@@ -394,6 +396,59 @@ export default class App {
             event.preventDefault();
             this.restart();
         });
+    }
+
+    /** Mobile-only: swipe right on #pattern-picker to return to the main menu panel. */
+    bindPickerBackSwipe() {
+        const SWIPE_MIN_PX = 50;
+        const AXIS_DOMINANCE = 1.25; // ignore mostly-vertical drags
+        let startX = 0;
+        let startY = 0;
+        let tracking = false;
+
+        const canSwipeBack = () => (
+            isMobileViewport()
+            && this.mode === 'menu'
+            && this.pickerPanelId !== PICKER_PANELS[0]
+            && this.$patternSelectList.hasClass('hidden')
+        );
+
+        this.$patternPicker.addEventListener('touchstart', (event) => {
+            if (!canSwipeBack()) return;
+            if (event.touches.length !== 1) return;
+            const touch = event.touches[0];
+            startX = touch.clientX;
+            startY = touch.clientY;
+            tracking = true;
+        }, { passive: true });
+
+        this.$patternPicker.addEventListener('touchmove', (event) => {
+            if (!tracking || event.touches.length !== 1) return;
+            const touch = event.touches[0];
+            const deltaX = touch.clientX - startX;
+            const deltaY = touch.clientY - startY;
+            // A mostly-vertical drag is probably scrolling elsewhere — bail.
+            if (Math.abs(deltaY) > SWIPE_MIN_PX && Math.abs(deltaY) > Math.abs(deltaX)) {
+                tracking = false;
+            }
+        }, { passive: true });
+
+        const finishSwipe = (event) => {
+            if (!tracking) return;
+            tracking = false;
+            if (!canSwipeBack()) return;
+            const touch = event.changedTouches[0];
+            const deltaX = touch.clientX - startX;
+            const deltaY = touch.clientY - startY;
+            if (deltaX < SWIPE_MIN_PX) return;
+            if (Math.abs(deltaX) < Math.abs(deltaY) * AXIS_DOMINANCE) return;
+            this.setPickerPanel('main');
+        };
+
+        this.$patternPicker.addEventListener('touchend', finishSwipe, { passive: true });
+        this.$patternPicker.addEventListener('touchcancel', () => {
+            tracking = false;
+        }, { passive: true });
     }
 
     bindSettingsEvents() {

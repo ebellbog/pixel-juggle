@@ -7,8 +7,10 @@
  *
  * Shared arm lengths/velocities apply to every orb; starting phases are
  * spaced evenly (phaseSpacing, default 120°) around the pivot. Outer
- * velocity is relative to the inner arm.
+ * velocity is relative to the inner arm. On mobile, only innerLength and
+ * outerLength are scaled (see mobile.js/menuOrbRadiusScale).
  */
+import { menuOrbRadiusScale, mobileViewportMediaQuery } from './mobile.js';
 export const MENU_ORB_LINKAGE = {
     innerLength: 90,
     outerLength: 30,
@@ -40,9 +42,10 @@ function linkagePosition(t, arm, phases) {
 }
 
 function linkageArm(config) {
+    const radiusScale = menuOrbRadiusScale();
     return {
-        innerLength: config.innerLength,
-        outerLength: config.outerLength,
+        innerLength: config.innerLength * radiusScale,
+        outerLength: config.outerLength * radiusScale,
         innerAngularVelocity: config.innerAngularVelocity,
         outerAngularVelocity: config.outerAngularVelocity,
     };
@@ -80,6 +83,17 @@ export default class MenuOrbAnimation {
         this.stopDelayId = null;
         this.reducedMotion = typeof window.matchMedia === 'function'
             && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        // Last t passed to apply() — when the mobile breakpoint flips (resize/
+        // rotation), onMobileViewportChange re-applies at this same phase so
+        // orbs jump to the correctly scaled radii without snapping to t = 0.
+        this.lastT = 0;
+        this.mobileQuery = mobileViewportMediaQuery();
+        if (this.mobileQuery) {
+            this.onMobileViewportChange = () => this.apply(this.lastT);
+            this.mobileQuery.addEventListener('change', this.onMobileViewportChange);
+        }
+
         this.apply(0);
     }
 
@@ -126,6 +140,7 @@ export default class MenuOrbAnimation {
     }
 
     apply(t) {
+        this.lastT = t;
         const arm = linkageArm(this.config);
         const count = Math.min(this.orbElements.length, this.config.orbCount);
 

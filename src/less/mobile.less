@@ -1,21 +1,118 @@
 // Mobile-specific layout and touch tweaks — imported from index.less.
-// No mobile-only rules lived in index.less yet; add shared mobile overrides
-// here rather than scattering @media blocks through the main stylesheet.
+// Keep @mobile / @mobile-landscape in sync with mobile.js (MOBILE_*_MEDIA_QUERY).
+
+// Touch-primary device with a small viewport in at least one dimension —
+// catches phones in portrait (narrow) and landscape (short). Width-only
+// max-width misses rotated phones (e.g. iPhone 12 landscape is 844px wide).
+@mobile: ~"(hover: none) and (pointer: coarse) and ((max-width: 767px) or (max-height: 767px))";
+@mobile-portrait: ~"(orientation: portrait) and (hover: none) and (pointer: coarse) and ((max-width: 767px) or (max-height: 767px))";
+@mobile-landscape: ~"(orientation: landscape) and (hover: none) and (pointer: coarse) and (max-height: 767px)";
 
 // --- All mobile (phones & small tablets) --------------------------------
 
-@media (max-width: 767px) {
-    // Placeholder — mobile-wide layout adjustments.
+@media @mobile {
+    // iOS Safari treats 100vh as the "large" viewport (URL bar hidden),
+    // which is taller than what's actually visible — the page becomes
+    // slightly scrollable and absolutely-positioned chrome (#settings-button,
+    // #game-controls) drifts off-screen. Lock the shell to the dynamic
+    // viewport and suppress rubber-band scrolling.
+    html,
+    body {
+        overflow: hidden;
+        overscroll-behavior: none;
+        width: 100%;
+        height: 100%;
+        height: 100dvh;
+    }
+
+    #app {
+        height: 100%;
+        height: 100dvh;
+        max-height: 100dvh;
+
+        .app-modal {
+            max-height: calc(100dvh - 72px);
+        }
+    }
+
+    #title-screen {
+        padding-top: 50px;
+    }
+
+    #settings-button, #game-controls {
+        top: 4px;
+    }
+    #settings-button {
+        left: 6px;
+    }
+    #game-controls {
+        right: 6px;
+    }
+
+    #title-credits {
+        z-index: 1;
+        background-color: fade(@bg, 80%);
+        padding-top: 4px;
+        padding-bottom: 4px;
+    }
 }
 
 // --- Portrait -----------------------------------------------------------
 
-@media (max-width: 767px) and (orientation: portrait) {
-    // Placeholder — portrait-only layout adjustments.
+@media @mobile-portrait {
+    #game-title {
+        font-size: 60px;
+    }
+
+    #pattern-picker {
+        top: 57%;
+        transform: translate(-50%, -50%) scale(.9);
+    }
 }
 
 // --- Landscape ----------------------------------------------------------
 
-@media (max-width: 767px) and (orientation: landscape) {
-    // Placeholder — landscape-only layout adjustments.
+#landscape-blocker {
+    display: none;
+}
+
+@media @mobile-landscape {
+    #landscape-blocker {
+        display: flex;
+        position: fixed;
+        inset: 0;
+        z-index: 10000;
+        align-items: center;
+        justify-content: center;
+        box-sizing: border-box;
+        padding: 24px 32px;
+        background-color: @bg;
+        color: fade(@text, 85%);
+        text-align: center;
+
+        p {
+            margin: 0;
+            max-width: 28em;
+            font-family: 'Turret Road', sans-serif;
+            font-weight: 200;
+            font-size: 20px;
+            line-height: 1.7;
+            margin-bottom: 24px;
+        }
+
+        strong {
+            font-weight: 700;
+        }
+
+        .ascii-font {
+            font-family: Arial, sans-serif;
+            font-size: 18px;
+            font-weight: 200;
+        }
+    }
+
+    #app {
+        visibility: hidden;
+        pointer-events: none;
+    }
 }

@@ -2,7 +2,7 @@
   "scripts": {
     "start": "webpack serve --mode=development",
     "build": "./node_modules/.bin/webpack --mode=production",
-    "ngrok": "ngrok http 9000 -host-header='localhost:9000'"
+    "ngrok": "ngrok http 9000 --host-header=rewrite"
   },
   "devDependencies": {
     "file-loader": "^6.2.0",

@@ -241,6 +241,9 @@ export default class Soundtrack {
         this.context = AudioContextClass ? new AudioContextClass({ latencyHint: 'playback' }) : null;
 
         this.muted = false;
+        // Set once unlockIOSAudio runs — see resume().
+        this._iosAudioUnlocked = false;
+        this._silentAudio = null;
         // Index into PROGRESSION - which chord the pattern's *current*
         // period is playing in (see advancePeriod/frequencyForThrow).
         this.progressionIndex = 0;
@@ -315,6 +318,37 @@ export default class Soundtrack {
     }
 
     /**
+     * Safari routes Web Audio through the ringer channel by default, so the
+     * hardware mute switch silences the built-in speaker (headphones still
+     * work). Promote the page to a media playback session on the first user
+     * gesture so game audio plays through the speaker like native media.
+     */
+    unlockIOSAudio() {
+        if (this._iosAudioUnlocked) return;
+        this._iosAudioUnlocked = true;
+
+        if (navigator.audioSession) {
+            navigator.audioSession.type = 'playback';
+        }
+
+        // Fallback for Safari builds without AudioSession: a looping silent
+        // HTML audio track keeps the page on the media channel alongside
+        // the Web Audio graph (same idea as the classic iOS "unmute" hack).
+        if (!this._silentAudio) {
+            const audio = document.createElement('audio');
+            audio.setAttribute('playsinline', '');
+            audio.setAttribute('webkit-playsinline', '');
+            audio.loop = true;
+            audio.preload = 'auto';
+            // Tiny silent WAV — no asset file needed.
+            audio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+            audio.volume = 0.001;
+            this._silentAudio = audio;
+        }
+        this._silentAudio.play().catch(() => {});
+    }
+
+    /**
      * Must be called from within a user-gesture handler (a click) - browsers
      * refuse to actually produce sound from an AudioContext until one
      * happens, so this alone doesn't guarantee audio, but nothing will play
@@ -333,6 +367,7 @@ export default class Soundtrack {
      */
     resume() {
         if (!this.context) return Promise.resolve();
+        this.unlockIOSAudio();
         if (this.context.state === 'suspended') {
             return this.context.resume().catch(() => {});
         }

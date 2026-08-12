@@ -30,6 +30,8 @@ function getPlugins(mode) {
 module.exports = (env, argv) => {
     return {
         devServer: {
+            host: '0.0.0.0',
+            disableHostCheck: true,
             contentBase: path.resolve(__dirname),
             port: 9000
         },

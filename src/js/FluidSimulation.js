@@ -30,7 +30,7 @@ const DYE_RESOLUTION = 512;
 // Jacobi iterations per frame solving the pressure Poisson equation - more
 // gives a more accurate (less "blobby"/compressible-looking) projection at
 // proportionally more GPU cost.
-const PRESSURE_ITERATIONS = 20;
+const PRESSURE_ITERATIONS = 24;
 // Multiplicative "fraction lost per second" applied during advection (see
 // ADVECTION_SHADER) - controls how quickly motion calms down and dye fades
 // on its own, independent of the (otherwise energy-conserving) advection/
@@ -42,7 +42,7 @@ const DYE_DISSIPATION = 0.5;
 const CURL_STRENGTH = 12;
 // Splat footprint, in UV units (post aspect-ratio correction - see
 // SPLAT_SHADER) - shared by both the dye and velocity splats.
-const SPLAT_RADIUS = 0.0022;
+const SPLAT_RADIUS = 0.0016;
 // Converts a ball's measured screen velocity (UV/sec) into the "texels of
 // the sim grid per second" unit the velocity texture is stored in (see
 // ADVECTION_SHADER's `texelSize` use) - simWidth/simHeight is exactly that

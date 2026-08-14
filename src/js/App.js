@@ -1130,7 +1130,14 @@ export default class App {
         // own while the sim/game keeps drawing, tear down once invisible,
         // reset the picker, then fade the menu in.
         const stopToken = this.startToken;
-        this.setMode(null);
+        // Keeps mode-competitive on through the fade, same as
+        // returnToMenuAfterGameOver's own setMode(null) call - dropping it
+        // here instead would instantly swap #practice-stat-group/#bpm-
+        // control back in (see body.mode-competitive in index.less),
+        // flashing the practice HUD over top of a still-visible frozen
+        // competitive screen for the rest of the fade.
+        const competitive = Boolean(this.game && this.game.isCompetitive);
+        this.setMode(null, { competitive });
 
         waitMs(SCREEN_FADE_MS).then(() => {
             if (stopToken !== this.startToken) return;

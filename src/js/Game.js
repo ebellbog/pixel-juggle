@@ -4,8 +4,25 @@ import Throw from './Throw.js';
 import KeyboardInput from './KeyboardInput.js';
 import { queueSlotPosition, queueSlotIndexForRender, QUEUE_SPACING_RADII } from './HandQueue.js';
 import { getAvailableHeights, computeLitRings, chargePastCancelThreshold, chargeInCancelFlash, chargeWedgeHidden } from './ThrowHeight.js';
+import { isMobileViewport } from './mobile.js';
 
 const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
+
+// Mobile only (see updateMobileLayout): gap kept both between the
+// pattern's own lowest point (a ball at rest in either hand) and the top
+// of the beat bar, and between the beat bar's own bottom edge and the top
+// of the wedges below it - deliberately the same value on both sides of
+// the beat bar, so it doesn't read as closer to one than the other.
+const MOBILE_BEAT_BAR_GAP_PX = 26;
+// Mobile only: gap kept between the very bottom of the screen and the
+// wedges' own lowest point (their target-indicator circle - see Renderer's
+// WEDGE_TARGET_RADIUS_INSET/computeMobileWedgeGeometry - not their vertex).
+const MOBILE_WEDGE_BOTTOM_MARGIN_PX = 14;
+// Mobile only: room reserved at the very top of the screen, above the
+// juggling area, for #game-stats' streak/best (or competitive score)
+// readout - it's positioned independently in CSS/HTML, not measured live
+// here, so this just needs to comfortably clear it.
+const MOBILE_TOP_HUD_RESERVE_PX = 70;
 
 // Match JugglingSimulator.resolveLandings - beat times and endTimes can differ
 // by a floating-point hair even when they represent the same instant.
@@ -157,6 +174,13 @@ export default class Game {
         this.period = this.physics.period;
         this.ballRadius = this.physics.ballRadius;
         this.extent = this.buildExtent();
+        // Mobile only - leftCx/rightCx/scale/cy for both throw-height
+        // wedges, recomputed by updateMobileLayout() whenever the fit
+        // changes (start/handleResize) and read by draw() every frame (see
+        // Renderer.drawThrowHeightWedge's `mobileLayout` param). Null on
+        // desktop/the demo, which draw() reads as "use the normal
+        // hand-anchored position" (see Renderer.draw).
+        this.mobileWedgeLayout = null;
 
         // How many correct throws in a row count as fully "back in the
         // groove" (see recordThrowSequenceOutcome/startGrooveCountdown) -
@@ -447,9 +471,14 @@ export default class Game {
 
     start() {
         this.renderer.resetIntensity();
-        this.renderer.fit(this.extent);
-        this.$beatBar.css('transform', 'scaleX(1)');
+        // Unhidden *before* updateMobileLayout(), which measures its live
+        // rendered height (see this.$beatBarWrap.outerHeight() there) -
+        // while .hidden (display: none), that measures as 0. Safe to do
+        // before positioning it: nothing repaints until this synchronous
+        // call stack finishes, so there's no visible flash at its old spot.
         this.$beatBarWrap.removeClass('hidden');
+        this.updateMobileLayout();
+        this.$beatBar.css('transform', 'scaleX(1)');
 
         for (const scheme of this.inputSchemes) scheme.attach();
 
@@ -1148,6 +1177,7 @@ export default class Game {
             ballRadius: this.ballRadius,
             wedges,
             jugglingBounds: this.computeJugglingScreenBounds(staticPaths),
+            mobileWedgeLayout: this.mobileWedgeLayout,
             bokehIntensity: this.getBokehIntensity(),
         });
     }
@@ -1278,8 +1308,98 @@ export default class Game {
 
     /** Re-fit and redraw against the same fixed geometry (e.g. on resize). */
     handleResize() {
-        this.renderer.fit(this.extent);
+        this.updateMobileLayout();
         this.draw();
+    }
+
+    /**
+     * Re-fits the renderer against this.extent and, on mobile, lays out
+     * the beat bar and both throw-height wedges around the *result* of
+     * that fit - called from both start() and handleResize(), since both
+     * change cssWidth/cssHeight (and therefore every one of these).
+     *
+     * Runs in two passes because of a chicken-and-egg problem: how much
+     * room fit() should reserve at the bottom of the screen depends on the
+     * wedges' own footprint (so the juggling area gets to use whatever
+     * room they don't need - see Renderer.fit's `reservedBottomPx`), but
+     * exactly where the beat bar (and, in turn, the wedges below it) ends
+     * up vertically depends on where fit() puts the pattern's own bottom
+     * edge. So: first ask Renderer for the wedges' width-driven scale/
+     * footprint alone (pure geometry, independent of any particular fit -
+     * see computeMobileWedgeGeometry), use that to size fit()'s
+     * reservation, *then* - now that fit() has picked a scale - explicitly
+     * override where it put the pattern vertically (see screenCenterY
+     * below) so its own actual bottom edge (a ball at rest in a hand)
+     * lands exactly on the reserved band's bottom edge, before finally
+     * planting the beat bar MOBILE_BEAT_BAR_GAP_PX below *that*, and the
+     * wedges' vertex that same gap below the beat bar - the same gap on
+     * both sides of the beat bar is the whole point (see its own doc
+     * comment), rather than the beat bar being closer to one side than the
+     * other.
+     *
+     * No-ops the mobile-only bits (and clears any inline beat-bar
+     * position, so mobile.less' own default layout applies) on desktop.
+     */
+    updateMobileLayout() {
+        if (!isMobileViewport()) {
+            this.renderer.fit(this.extent);
+            this.$beatBarWrap.css({ top: '', bottom: '' });
+            this.mobileWedgeLayout = null;
+            return;
+        }
+
+        const ringCount = Math.max(this.crossHeights.length, this.selfHeights.length);
+        const wedgeGeometry = this.renderer.computeMobileWedgeGeometry(ringCount);
+        const beatBarHeight = this.$beatBarWrap.outerHeight();
+        const reservedBottomPx = MOBILE_BEAT_BAR_GAP_PX
+            + beatBarHeight
+            + MOBILE_BEAT_BAR_GAP_PX
+            + wedgeGeometry.aboveVertex
+            + wedgeGeometry.belowVertex
+            + MOBILE_WEDGE_BOTTOM_MARGIN_PX;
+
+        this.renderer.fit(this.extent, {
+            reserveMobileControls: true,
+            reservedTopPx: MOBILE_TOP_HUD_RESERVE_PX,
+            reservedBottomPx,
+        });
+
+        // fit() picks a scale that's guaranteed to fit the whole extent
+        // (including e.g. the peak of the tallest throw) within the
+        // reserved band without clipping, but - by default - centers it
+        // within that band, splitting any leftover slack evenly above and
+        // below. On a pattern that doesn't need the band's full height
+        // (most of them, since scale is very often width-, not
+        // height-, bound on a narrow phone screen), that put unused space
+        // right where it's most visible: between the pattern and the beat
+        // bar below it, exactly undoing reservedBottomPx's whole point.
+        // Re-deriving screenCenterY (solving worldToScreen(handY).y +
+        // ballRadius*scale === bandBottom for screenCenterY) instead
+        // bottom-anchors the pattern's real lowest visual point flush
+        // against the band's bottom edge, pushing all of that leftover
+        // slack up above the pattern instead - which, conveniently, is
+        // exactly where MOBILE_TOP_HUD_RESERVE_PX already wants some
+        // breathing room for #game-stats anyway.
+        const bandBottom = this.renderer.cssHeight - reservedBottomPx;
+        const { scale, centerY } = this.renderer.camera;
+        this.renderer.camera.screenCenterY = bandBottom + scale * (this.physics.handY - centerY - this.ballRadius);
+
+        // Exactly bandBottom by construction (see screenCenterY above) -
+        // spelled out via worldToScreen anyway, rather than just using
+        // bandBottom directly, so this reads the same way positionMobile-
+        // BeatBar's very first version did, and stays correct even if the
+        // anchor formula above ever changes.
+        const patternBottomY = this.renderer.worldToScreen(0, this.physics.handY).y + this.ballRadius * scale;
+        const beatBarTop = patternBottomY + MOBILE_BEAT_BAR_GAP_PX;
+        this.$beatBarWrap.css({ top: `${beatBarTop}px`, bottom: 'auto' });
+
+        const wedgeVertexY = beatBarTop + beatBarHeight + MOBILE_BEAT_BAR_GAP_PX + wedgeGeometry.aboveVertex;
+        this.mobileWedgeLayout = {
+            leftCx: wedgeGeometry.leftCx,
+            rightCx: wedgeGeometry.rightCx,
+            scale: wedgeGeometry.scale,
+            cy: wedgeVertexY,
+        };
     }
 
     /**

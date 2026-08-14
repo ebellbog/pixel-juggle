@@ -55,6 +55,21 @@
         padding-top: 4px;
         padding-bottom: 4px;
     }
+
+    // Gameplay layout: the juggling area itself only claims an upper slice
+    // of the screen on mobile, sized to leave just enough room below for
+    // the beat bar and both throw-height wedges (drawn on the canvas
+    // itself - see Game.updateMobileLayout/Renderer.computeMobileWedgeGeometry)
+    // stacked below it, instead of desktop's bottom-hugging beat bar and
+    // hand-anchored wedges. Unlike desktop, `top`/`bottom` are left unset
+    // here - Game.updateMobileLayout pins them inline instead, since where
+    // the beat bar actually belongs depends on the fitted pattern's own
+    // aspect ratio, not a fixed line. Just a little thinner than desktop's
+    // 12px, now that it sits right against the pattern instead of a fixed
+    // strip further down the screen.
+    #beat-bar-wrap {
+        height: 7px;
+    }
 }
 
 // --- Portrait -----------------------------------------------------------
@@ -67,6 +82,10 @@
     #pattern-picker {
         top: 57%;
         transform: translate(-50%, -50%) scale(.9);
+    }
+
+    #game-stats {
+        top: 4em;
     }
 }
 

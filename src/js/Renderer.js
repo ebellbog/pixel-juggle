@@ -1,5 +1,6 @@
 import FluidSimulation from './FluidSimulation.js';
 import { DEFAULT_KEY_BINDINGS, formatKeycapLabel } from './KeyboardInput.js';
+import { isMobileViewport } from './mobile.js';
 
 // A soft, colored background wash driven by the balls' own motion - either
 // a real GPU fluid simulation (see FluidSimulation.js) if this device
@@ -115,6 +116,48 @@ const BOKEH_MAX_DT = 0.1; // Matches App/Game's own big-frame-gap clamp.
 const BALL_SHADOW_BLUR_RATIO = 0.1;
 const BALL_SHADOW_OFFSET_Y_RATIO = 0.25;
 
+// Throw-height wedge ring geometry (see drawThrowHeightWedge) - hoisted to
+// module level, rather than left as local consts inside that method, so
+// computeMobileWedgeGeometry can size the mobile layout against the exact
+// same numbers rather than a second, easily-drifting copy of them.
+const WEDGE_INNER_RADIUS = 28;
+const WEDGE_RING_THICKNESS = 40;
+// How much smaller the target-indicator circle at the vertex is than
+// innerRadius (see drawThrowHeightWedge's targetRadius) - that circle is
+// centered *on* the vertex, so it extends this far past it on every side,
+// including straight down - computeMobileWedgeGeometry has to leave room
+// for that below the vertex, not just for the rings above it.
+const WEDGE_TARGET_RADIUS_INSET = 6;
+
+// --- Mobile gameplay layout (see computeMobileWedgeGeometry) -------------
+// Both wedges sit side by side below the beat bar on mobile (see Game's
+// updateMobileLayout, which both sizes fit()'s reserved bottom band around
+// this geometry and plants the wedges' own vertex within it, rather than
+// this file assuming any particular reserved band up front - see that
+// method's doc for the full layout).
+//
+// Inset from the left/right screen edges the wedge band itself starts from.
+const MOBILE_WEDGE_SIDE_MARGIN_PX = 10;
+// Minimum horizontal clearance kept between the two wedges' innermost
+// (closest-to-center) edges at their widest, so a narrow screen never lets
+// them touch even at the largest scale that still avoids clipping the
+// outer screen edges.
+const MOBILE_WEDGE_CENTER_GAP_PX = 16;
+// Vertical room reserved above the outer ring for the "LEFT HAND"/"RIGHT
+// HAND" label, whether or not it's actually showing (see
+// Settings/uiLabelHands) - so toggling that setting never resizes the
+// wedges themselves.
+const MOBILE_WEDGE_LABEL_ALLOWANCE_PX = 26;
+// Sanity bounds on the solved scale (see computeMobileWedgeGeometry) -
+// floor keeps a very tall/many-ringed pattern from shrinking to near-
+// nothing on a narrow screen; ceiling keeps a short/few-ringed one from
+// ballooning past a sensible size on a roomy one (e.g. a wide, mobile-
+// classified tablet), which - since the wedges' own size now dictates how
+// much room fit() reserves for them, rather than the other way around -
+// would otherwise be able to crowd the juggling area out with no limit.
+const MOBILE_WEDGE_MIN_SCALE = 0.35;
+const MOBILE_WEDGE_MAX_SCALE = 1.6;
+
 /** '#rrggbb' -> {r, g, b} - every ball color (see Ball.js's PALETTE) is already exactly this shape. */
 function hexToRgb(hex) {
     const value = parseInt(hex.slice(1), 16);
@@ -219,16 +262,49 @@ export default class Renderer {
         this.fluid?.resize(this.cssWidth, this.cssHeight);
     }
 
-    /** Fit the given world-space extent into the viewport, preserving aspect. */
-    fit(extent) {
+    /**
+     * Fit the given world-space extent into the viewport, preserving aspect.
+     *
+     * `reservedTopPx`/`reservedBottomPx` (opt-in via reserveMobileControls -
+     * see Game's updateMobileLayout) shrink the juggling area, on mobile
+     * only, to whatever's left between that many pixels at the top of the
+     * screen (room for #game-stats' streak/score readout) and that many at
+     * the bottom (the beat bar and throw-height wedges Game stacks below
+     * it, sized around their own actual footprint rather than a fixed
+     * fraction of the screen) - so the juggling area gets to use whatever
+     * room neither needs. The resulting `scale` fits the whole extent into
+     * that band without clipping either edge regardless of exactly where
+     * *within* the band it ends up placed - Game overrides screenCenterY's
+     * default (centered in the band, i.e. equal slack top and bottom) right
+     * after calling this, to bottom-anchor the pattern's real lowest visual
+     * point flush against the band's bottom edge instead (see
+     * updateMobileLayout's own doc for why). The demo ("Visualize") has
+     * none of that HUD, so its own fit() calls (see App.js) leave this off
+     * and get the full screen on mobile too, same as desktop always has.
+     */
+    fit(extent, { reserveMobileControls = false, reservedTopPx = 0, reservedBottomPx = 0 } = {}) {
         const worldWidth = Math.max(extent.maxX - extent.minX, 1e-6);
         const worldHeight = Math.max(extent.maxY - extent.minY, 1e-6);
         const usableWidth = this.cssWidth * (1 - this.padding * 2);
-        const usableHeight = this.cssHeight * (1 - this.padding * 2);
+
+        const mobileReserved = reserveMobileControls && isMobileViewport();
+        const bandTop = mobileReserved ? reservedTopPx : 0;
+        const bandBottom = mobileReserved ? Math.max(bandTop, this.cssHeight - reservedBottomPx) : this.cssHeight;
+        const bandHeight = bandBottom - bandTop;
+        // Padding still insets the pattern within the band on desktop, as
+        // always - but not on mobile, where bandTop/bandBottom are already
+        // exact, purpose-built margins (see Game.updateMobileLayout), and
+        // insetting further here would just reopen the same dead space a
+        // fixed-ratio reservation used to leave.
+        const usableHeight = mobileReserved ? bandHeight : bandHeight * (1 - this.padding * 2);
+
         this.camera = {
             scale: Math.min(usableWidth / worldWidth, usableHeight / worldHeight),
             centerX: (extent.minX + extent.maxX) / 2,
             centerY: (extent.minY + extent.maxY) / 2,
+            // Vertically centered within the band by default - see this
+            // method's own doc for why/when Game overrides it afterward.
+            screenCenterY: bandTop + bandHeight / 2,
         };
         this.extent = extent;
     }
@@ -271,11 +347,65 @@ export default class Renderer {
         return { cx, cy: handAnchor.y - WEDGE_OFFSET_Y };
     }
 
+    /**
+     * Mobile-only wedge geometry: horizontal position and shared scale for
+     * both wedges, sitting side by side below the beat bar rather than
+     * floating just above each hand (see wedgeScreenPosition). Purely a
+     * function of screen width and `ringCount` - deliberately knows nothing
+     * about where the vertex actually lands vertically (see aboveVertex/
+     * belowVertex below); that's for Game.updateMobileLayout to plant using
+     * its own live beat-bar position, once it has one, which is also what
+     * sizes fit()'s reserved bottom band around this in the first place -
+     * this can't reach back and constrain itself against that without
+     * circularity.
+     *
+     * Solves for the single uniform `scale` (applied around each wedge's
+     * own vertex - see drawThrowHeightWedge) that lets both sit side by
+     * side without overlapping each other or clipping the screen's side
+     * edges, regardless of `ringCount` - a taller/harder pattern (more
+     * rings, i.e. a bigger unscaled wedge) simply solves for a smaller
+     * scale rather than ever overflowing. Both hands share crossHeights/
+     * selfHeights (see Game's this.cross/selfHeights), so `ringCount` - and
+     * therefore `scale` - is identical for both; only the horizontal vertex
+     * position (`leftCx`/`rightCx`) differs between them.
+     */
+    computeMobileWedgeGeometry(ringCount) {
+        const outerRadius = WEDGE_INNER_RADIUS + Math.max(0, ringCount) * WEDGE_RING_THICKNESS;
+        const targetRadius = WEDGE_INNER_RADIUS - WEDGE_TARGET_RADIUS_INSET;
+
+        const zoneLeft = MOBILE_WEDGE_SIDE_MARGIN_PX;
+        const zoneWidth = Math.max(0, this.cssWidth - zoneLeft * 2);
+
+        // Each vertex sits at the horizontal midpoint of its half of the
+        // zone, which - by symmetry - puts it exactly zoneWidth/4 away from
+        // both the nearest screen edge and the shared center line, so one
+        // subtraction covers both the clipping and overlap constraints.
+        const halfSpanAvailable = Math.max(0, zoneWidth / 4 - MOBILE_WEDGE_CENTER_GAP_PX / 2);
+        const scaleFromWidth = halfSpanAvailable / (outerRadius * Math.SQRT1_2);
+        const scale = Math.max(MOBILE_WEDGE_MIN_SCALE, Math.min(scaleFromWidth, MOBILE_WEDGE_MAX_SCALE));
+
+        return {
+            leftCx: zoneLeft + zoneWidth / 4,
+            rightCx: zoneLeft + zoneWidth * 3 / 4,
+            scale,
+            // How far the wedge's visible extent reaches above and below
+            // its own vertex at this scale - above: the outer ring plus the
+            // hand-label allowance; below: the target-indicator circle's
+            // own radius, since it's centered on the vertex rather than
+            // sitting above it like the rings (see WEDGE_TARGET_RADIUS_
+            // INSET). Game sums these into how much room to reserve below
+            // the beat bar, then uses aboveVertex again to plant the vertex
+            // that far below wherever it ends up (see updateMobileLayout).
+            aboveVertex: (outerRadius + MOBILE_WEDGE_LABEL_ALLOWANCE_PX) * scale,
+            belowVertex: targetRadius * scale,
+        };
+    }
+
     worldToScreen(x, y) {
-        const { scale, centerX, centerY } = this.camera;
+        const { scale, centerX, centerY, screenCenterY } = this.camera;
         return {
             x: this.cssWidth / 2 + (x - centerX) * scale,
-            y: this.cssHeight / 2 - (y - centerY) * scale,
+            y: (screenCenterY ?? this.cssHeight / 2) - (y - centerY) * scale,
         };
     }
 
@@ -570,9 +700,13 @@ export default class Renderer {
         }
         ctx.restore();
 
-        if (state.wedges) {
+        if (state.wedges && state.wedges.length) {
+            // Both hands share the same layout (see computeMobileWedgeGeometry's
+            // doc comment) - state.mobileWedgeLayout is null on desktop/the
+            // demo (see Game.updateMobileLayout), falling back to each
+            // wedge's own hand-anchored position (see wedgeScreenPosition).
             for (const wedge of state.wedges) {
-                this.drawThrowHeightWedge(wedge, state.jugglingBounds);
+                this.drawThrowHeightWedge(wedge, state.jugglingBounds, state.mobileWedgeLayout ?? null);
             }
         }
     }
@@ -617,16 +751,27 @@ export default class Renderer {
      * vertex sits halfway between the screen edge and where balls/paths
      * actually are - not the padded camera-fit extent.
      * ring geometry itself stays a constant pixel size regardless of zoom.
+     *
+     * `mobileLayout` (see Game.updateMobileLayout/Renderer.draw), when
+     * given, overrides both the vertex position and adds a uniform `scale`
+     * around it - the whole wedge is drawn exactly as below either way,
+     * just translated/scaled as one unit (see the ctx.translate/scale right
+     * after ctx.save()), so every fixed-pixel constant here still reads as
+     * plain, unscaled screen pixels in the code even though mobile ends up
+     * rendering it smaller (or larger) on screen.
      */
-    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, sync, activeSide, litRings, cancelFlash, locked, beatFlash, target }, jugglingBounds) {
+    drawThrowHeightWedge({ hand, anchor, crossHeights, selfHeights, sync, activeSide, litRings, cancelFlash, locked, beatFlash, target }, jugglingBounds, mobileLayout = null) {
         const ctx = this.ctx;
-        const { cx, cy } = this.wedgeScreenPosition(hand, anchor, jugglingBounds);
+        let { cx, cy } = mobileLayout
+            ? { cx: hand === 'L' ? mobileLayout.leftCx : mobileLayout.rightCx, cy: mobileLayout.cy }
+            : this.wedgeScreenPosition(hand, anchor, jugglingBounds);
+        const scale = mobileLayout ? mobileLayout.scale : 1;
 
-        const innerRadius = 28;
+        const innerRadius = WEDGE_INNER_RADIUS;
         // Smaller than innerRadius so the target indicator sits entirely
         // within the vertex gap, never touching the innermost ring.
-        const targetRadius = innerRadius - 6;
-        const ringThickness = 40;
+        const targetRadius = innerRadius - WEDGE_TARGET_RADIUS_INSET;
+        const ringThickness = WEDGE_RING_THICKNESS;
         const ringCount = Math.max(crossHeights.length, selfHeights.length);
         const outerRadius = innerRadius + ringCount * ringThickness;
         const halfAngle = Math.PI / 4; // 45 degrees either side of vertical.
@@ -645,6 +790,14 @@ export default class Renderer {
         const flashStyle = beatFlash ? flashColors[beatFlash] : null;
 
         ctx.save();
+        // Translating to the vertex and scaling around it here (a no-op at
+        // scale 1, i.e. every desktop call) means everything drawn below can
+        // stay written in plain fixed-pixel terms - radii, offsets, font
+        // sizes - rather than needing each one multiplied through by hand.
+        ctx.translate(cx, cy);
+        if (scale !== 1) ctx.scale(scale, scale);
+        cx = 0;
+        cy = 0;
         ctx.lineWidth = 1;
         ctx.strokeStyle = flashStyle?.stroke ?? (cancelFlash ? 'rgba(255, 120, 120, 0.95)' : 'rgba(255, 255, 255, 0.9)');
         ctx.textAlign = 'center';

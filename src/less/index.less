@@ -281,6 +281,36 @@ body.mode-competitive {
 
 // --- Title screen (menu) ----------------------------------------------
 
+@title-glow-pulse-duration: 5s;
+
+@keyframes title-glow-pulse-inner {
+    0%,
+    100% {
+        // filter: blur(6px);
+        opacity: 0.2;
+    }
+
+    50% {
+        // filter: blur(12px);
+        opacity: 0.5;
+    }
+}
+
+@keyframes title-glow-pulse-outer {
+    0%,
+    100% {
+        // filter: blur(20px);
+        opacity: 0.3;
+        transform: scale(.9);
+    }
+
+    50% {
+        // filter: blur(36px);
+        opacity: 0.55;
+        transform: scale(1.08);
+    }
+}
+
 #game-title {
     // Major Mono Display is the active pick - Londrina Sketch and Plaster
     // are loaded too (see index.html's Google Fonts link) as easy backups;
@@ -325,12 +355,28 @@ body.mode-competitive {
 
     &::before {
         filter: blur(10px);
-        opacity: 0.4;
+        animation: title-glow-pulse-inner @title-glow-pulse-duration ease-in-out infinite;
     }
 
     &::after {
         filter: blur(32px);
-        opacity: 0.4;
+        transform-origin: center;
+        animation: title-glow-pulse-outer @title-glow-pulse-duration ease-in-out infinite;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #game-title {
+        &::before,
+        &::after {
+            animation: none;
+            filter: blur(10px);
+            opacity: 0.4;
+        }
+
+        &::after {
+            filter: blur(32px);
+        }
     }
 }
 

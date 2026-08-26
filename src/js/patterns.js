@@ -7,15 +7,16 @@ export const PATTERN_GROUPS = [
         patterns: [
             { value: '3', name: 'Cascade' },
             { value: '51', name: 'Shower' },
+            { value: '4', name: '4 Ball Fountain' },
+            // { value: '(4,4)', name: '4 Ball Sync Fountain' },
             { value: '5', name: '5 Ball Cascade' },
-            { value: '441', name: 'Half Box' },
         ],
     },
     {
         label: 'Medium',
         patterns: [
-            { value: '4', name: '4 Ball Fountain' },
-            { value: '(4,4)', name: '4 Ball Sync Fountain' },
+            { value: '441', name: 'Half Box' },
+            { value: '423', name: '423' },
             { value: '447', name: '447' },
             { value: '531', name: '531' },
         ],

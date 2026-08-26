@@ -41,12 +41,25 @@
 
     #settings-button, #game-controls {
         top: 4px;
+        opacity: .5!important;
+
+        &:active {
+            opacity: 1!important;
+        }
     }
     #settings-button {
         left: 6px;
     }
     #game-controls {
+        flex-direction: column-reverse;
         right: 6px;
+        gap: 4px;
+    }
+
+    // Score/streak HUD - pinned near the top now that the beat bar no
+    // longer sits below the juggling pattern eating vertical space.
+    #game-stats {
+        top: 14px;
     }
 
     #title-credits {
@@ -70,6 +83,14 @@
     #beat-bar-wrap {
         height: 7px;
     }
+
+    // Throw input happens by touching the wedges drawn directly on this
+    // canvas (see TouchInput/Game.handleDragStart et al) - without this,
+    // a drag gesture also pans/scrolls the page underneath it, and a quick
+    // tap can trigger the browser's own double-tap-to-zoom.
+    #juggle-canvas {
+        touch-action: none;
+    }
 }
 
 // --- Portrait -----------------------------------------------------------
@@ -82,10 +103,6 @@
     #pattern-picker {
         top: 57%;
         transform: translate(-50%, -50%) scale(.9);
-    }
-
-    #game-stats {
-        top: 4em;
     }
 }
 

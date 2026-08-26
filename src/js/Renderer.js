@@ -157,6 +157,20 @@ const MOBILE_WEDGE_LABEL_ALLOWANCE_PX = 26;
 // would otherwise be able to crowd the juggling area out with no limit.
 const MOBILE_WEDGE_MIN_SCALE = 0.35;
 const MOBILE_WEDGE_MAX_SCALE = 1.6;
+// hitTestMobileWedge's ball zone is grown to at least this screen-pixel
+// radius (regardless of the wedge's own drawn scale) - the visual target
+// indicator can shrink well under a comfortable touch target on a small
+// phone at MOBILE_WEDGE_MIN_SCALE, and unlike the ring band above it
+// (already a broad ~40px-thick swipe target), the ball is a drag's one and
+// only way in, so it can't afford to be fussy about a slightly-off touch.
+const MOBILE_WEDGE_MIN_BALL_HIT_RADIUS = 24;
+// hitTestMobileWedge's outermost ring is likewise grown by this many extra
+// screen pixels past its own visible outer edge, so overshooting the very
+// top of a drag doesn't fall past the wedge entirely and cancel the throw
+// (see the cancel-on-drag-off-wedge behavior in Game.handleDragUpdate) -
+// tune freely; this only affects hit-testing, never how far the rings
+// themselves are actually drawn.
+const MOBILE_WEDGE_OUTER_TOUCH_BUFFER_PX = 24;
 
 /** '#rrggbb' -> {r, g, b} - every ball color (see Ball.js's PALETTE) is already exactly this shape. */
 function hexToRgb(hex) {
@@ -399,6 +413,75 @@ export default class Renderer {
             aboveVertex: (outerRadius + MOBILE_WEDGE_LABEL_ALLOWANCE_PX) * scale,
             belowVertex: targetRadius * scale,
         };
+    }
+
+    /**
+     * Hit-tests one screen point (canvas-local CSS pixels, i.e. already
+     * relative to the canvas's own top-left - see Game.hitTestWedgeTouch)
+     * against both mobile wedges, mirroring drawThrowHeightWedge's own
+     * geometry exactly (same constants, same translate/scale-around-vertex,
+     * same 45°-either-side-of-vertical self/cross split) so a touch lands
+     * wherever it visually appears to. `mobileLayout` is Game's live
+     * this.mobileWedgeLayout (see updateMobileLayout) and `ringCount` the
+     * same ladder length drawThrowHeightWedge derives from crossHeights/
+     * selfHeights - both handed in rather than read off `this`, since
+     * neither actually lives on the Renderer instance itself.
+     *
+     * Returns `{ hand, zone: 'ball' }` for the target-indicator circle at
+     * the vertex (grown to a minimum comfortable touch radius - see
+     * MOBILE_WEDGE_MIN_BALL_HIT_RADIUS), `{ hand, zone: 'ring', crossing,
+     * ring }` (ring is 1-based, and its outer edge is likewise grown a bit
+     * past the outermost ring's true edge - see
+     * MOBILE_WEDGE_OUTER_TOUCH_BUFFER_PX) for a point within the ring band,
+     * or null if the point misses both wedges entirely (including the
+     * small dead gap between the ball and the innermost ring, and the area
+     * within outerRadius but outside the 90°-wide fan on either side).
+     */
+    hitTestMobileWedge(x, y, mobileLayout, ringCount) {
+        if (!mobileLayout) return null;
+
+        const innerRadius = WEDGE_INNER_RADIUS;
+        const targetRadius = WEDGE_INNER_RADIUS - WEDGE_TARGET_RADIUS_INSET;
+        const ringThickness = WEDGE_RING_THICKNESS;
+        const outerRadius = innerRadius + Math.max(0, ringCount) * ringThickness;
+        const halfAngle = Math.PI / 4; // Matches drawThrowHeightWedge's own 45 degrees either side of vertical.
+        const upAngle = -Math.PI / 2;
+        const leftAngle = upAngle - halfAngle;
+        const rightAngle = upAngle + halfAngle;
+
+        for (const hand of ['L', 'R']) {
+            const cx = hand === 'L' ? mobileLayout.leftCx : mobileLayout.rightCx;
+            const cy = mobileLayout.cy;
+            const scale = mobileLayout.scale || 1;
+            // Undo drawThrowHeightWedge's own translate(cx, cy)/scale(scale)
+            // around the vertex, so every radius/angle below reads in the
+            // same plain, unscaled terms that method's own constants do.
+            const dx = (x - cx) / scale;
+            const dy = (y - cy) / scale;
+            const r = Math.hypot(dx, dy);
+
+            // Capped at innerRadius - the ring band's own start - so growing
+            // the ball's touch target on a very small/high-ring-count wedge
+            // (see MOBILE_WEDGE_MIN_SCALE) can never eat into (or past) the
+            // rings above it, even though that means falling short of a
+            // fully comfortable radius in that extreme case.
+            const ballHitRadius = Math.min(innerRadius, Math.max(targetRadius, MOBILE_WEDGE_MIN_BALL_HIT_RADIUS / scale));
+            if (r <= ballHitRadius) return { hand, zone: 'ball' };
+            const outerHitRadius = outerRadius + MOBILE_WEDGE_OUTER_TOUCH_BUFFER_PX / scale;
+            if (r < innerRadius || r > outerHitRadius) continue;
+
+            // atan2's (-π, π] range never needs unwrapping here - the fan
+            // (leftAngle..rightAngle, i.e. -135°..-45°) sits entirely away
+            // from the ±180° seam on either side of it.
+            const angle = Math.atan2(dy, dx);
+            if (angle < leftAngle || angle >= rightAngle) continue; // Outside this hand's 90° fan.
+
+            const crossing = hand === 'L' ? angle >= upAngle : angle < upAngle;
+            const ring = Math.min(ringCount, Math.floor((r - innerRadius) / ringThickness) + 1);
+            return { hand, zone: 'ring', crossing, ring };
+        }
+
+        return null;
     }
 
     worldToScreen(x, y) {

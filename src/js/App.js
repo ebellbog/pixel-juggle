@@ -8,7 +8,7 @@ import Settings from './Settings.js';
 import Scores from './Scores.js';
 import PatternSelection from './PatternSelection.js';
 import MenuOrbAnimation from './MenuOrbAnimation.js';
-import { isMobileViewport } from './mobile.js';
+import { isMobileViewport, mobileViewportMediaQuery } from './mobile.js';
 import { PATTERN_GROUPS, CUSTOM_PATTERN_VALUE, patternShowsSiteswap, findPattern } from './patterns.js';
 import { buildControlsModalData } from './KeyboardInput.js';
 import creditsModalTemplate from '../templates/credits-modal.handlebars';
@@ -158,6 +158,7 @@ export default class App {
         this.$grooveCountdown = $('#groove-countdown');
         this.$grooveCountdownValue = $('#groove-countdown-value');
         this.$validationIcon = $('#validation-icon');
+        this.$bpmControl = $('#bpm-control');
         this.$bpmSlider = $('#bpm-slider');
         this.$bpmValue = $('#bpm-value');
         this.$beatBarWrap = $('#beat-bar-wrap');
@@ -451,7 +452,31 @@ export default class App {
         }, { passive: true });
     }
 
+    /**
+     * The 'drag' inputType (see Settings.js) only makes sense on a
+     * touchscreen - hidden entirely on desktop, and auto-demoted back to
+     * 'hold' if the browser's own layout flips from mobile to desktop
+     * while it's selected (e.g. resizing devtools' responsive mode
+     * mid-test), rather than silently leaving a keyboard-only session
+     * bound to a setting it has no way to act on.
+     */
+    bindMobileInputTypeGuard() {
+        const $dragOption = $('.settings-option[data-value="drag"]');
+        const syncDragVisibility = () => $dragOption.toggleClass('hidden', !isMobileViewport());
+        syncDragVisibility();
+
+        const query = mobileViewportMediaQuery();
+        if (!query) return;
+        query.addEventListener('change', (event) => {
+            syncDragVisibility();
+            if (!event.matches && this.settings.get('inputType') === 'drag') {
+                this.applySetting('inputType', 'hold');
+            }
+        });
+    }
+
     bindSettingsEvents() {
+        this.bindMobileInputTypeGuard();
         this.$settingsButton.on('click', () => this.openSettings());
         this.$settingsCloseButton.on('click', () => this.closeSettings());
         // Clicking the darkened backdrop itself (not anything inside the
@@ -689,12 +714,26 @@ export default class App {
         this.renderer.resize();
         if (this.simulator) {
             this.renderer.fit(this.simulator.getExtent());
+            this.resetBpmControlPosition();
             this.renderer.draw(this.buildDemoRenderState());
         } else if (this.game) {
             this.game.handleResize();
         } else {
             this.renderer.draw({ balls: [] });
         }
+    }
+
+    /**
+     * Clears any inline top/transform Game.updateMobileLayout may have left
+     * on #bpm-control from a previous "Let me try!" session, so the demo
+     * ("Visualize") - which shows no throw-height wedge UI to vertically
+     * center against - falls back to its own CSS default of centering on
+     * the full screen instead. Game itself always re-applies its own
+     * override the moment a new session starts (see updateMobileLayout), so
+     * this only ever needs calling from the demo's own start/resize path.
+     */
+    resetBpmControlPosition() {
+        this.$bpmControl.css({ top: '', transform: '' });
     }
 
     /** Dispatches a title-screen menu button press (see #menu-buttons' data-action). */
@@ -875,6 +914,7 @@ export default class App {
         this.setMode('demo');
         this.renderer.resize();
         this.renderer.resetIntensity();
+        this.resetBpmControlPosition();
 
         // A click handler is exactly the user gesture browsers require
         // before an AudioContext is allowed to actually produce sound - see
@@ -996,6 +1036,7 @@ export default class App {
                 renderer: this.renderer,
                 $beatBar: this.$beatBar,
                 $beatBarWrap: this.$beatBarWrap,
+                $bpmControl: this.$bpmControl,
                 $streakValue: this.$streakValue,
                 $maxStreakValue: this.$maxStreakValue,
                 soundtrack: this.soundtrack,

@@ -1,3 +1,5 @@
+import { isMobileViewport } from './mobile.js';
+
 const STORAGE_KEY = 'pixel-juggle-settings';
 
 // Every setting's default value, doubling as the full set of known setting
@@ -8,10 +10,13 @@ export const DEFAULT_SETTINGS = {
     // the fallback even where fluid would work), or 'off' (no background
     // wash at all).
     backgroundEffect: 'fluid',
-    // 'hold' (charge up a throw height by holding the key, release to lock
-    // it in - see Game.handleThrowStart) or 'tap' (each press instead
+    // 'hold' (charge up a throw height by holding the key/wedge, release to
+    // lock it in - see Game.handleThrowStart), 'tap' (each press instead
     // immediately cycles the locked height up by one ring - see
-    // Game.handleTapThrow).
+    // Game.handleTapThrow), or 'drag' (mobile-only touch gesture - drag up
+    // from the wedge's ball outline to a ring, release to lock it in - see
+    // Game.handleDragStart/TouchInput). This default ('hold') only applies
+    // on desktop - see the mobile-aware override in the constructor below.
     inputType: 'hold',
     // Independent on/off toggles for each sound category (see
     // Soundtrack.isSoundCategoryEnabled) - the in-game mute button
@@ -28,7 +33,7 @@ export const DEFAULT_SETTINGS = {
 
 const VALID_VALUES = {
     backgroundEffect: ['fluid', 'bokeh', 'off'],
-    inputType: ['hold', 'tap'],
+    inputType: ['hold', 'tap', 'drag'],
     soundPercussion: ['on', 'off'],
     soundThrowTones: ['on', 'off'],
     soundButtons: ['on', 'off'],
@@ -54,7 +59,12 @@ const SOUND_CATEGORY_KEYS = ['soundPercussion', 'soundThrowTones', 'soundButtons
  */
 export default class Settings {
     constructor() {
-        this.values = { ...DEFAULT_SETTINGS, ...this.loadStored() };
+        this.values = { ...this.deviceDefaults(), ...this.loadStored() };
+    }
+
+    /** DEFAULT_SETTINGS, except inputType starts at 'drag' (the touch-native gesture) rather than 'hold' on a mobile device - see the constructor/resetToDefaults. */
+    deviceDefaults() {
+        return isMobileViewport() ? { ...DEFAULT_SETTINGS, inputType: 'drag' } : DEFAULT_SETTINGS;
     }
 
     /** Only keeps recognized keys with a currently-valid value - guards against a stale/differently-shaped blob from an earlier version. */
@@ -93,7 +103,7 @@ export default class Settings {
     }
 
     resetToDefaults() {
-        this.values = { ...DEFAULT_SETTINGS };
+        this.values = { ...this.deviceDefaults() };
         this.persist();
     }
 

@@ -2,6 +2,7 @@ import JugglingSimulator from './JugglingSimulator.js';
 import Ball from './Ball.js';
 import Throw from './Throw.js';
 import KeyboardInput from './KeyboardInput.js';
+import TouchInput from './TouchInput.js';
 import { queueSlotPosition, queueSlotIndexForRender, QUEUE_SPACING_RADII } from './HandQueue.js';
 import { getAvailableHeights, computeLitRings, chargePastCancelThreshold, chargeInCancelFlash, chargeWedgeHidden } from './ThrowHeight.js';
 import { isMobileViewport } from './mobile.js';
@@ -13,16 +14,16 @@ const MAX_FRAME_DT = 0.1; // Clamp huge gaps (e.g. backgrounded tab).
 // of the beat bar, and between the beat bar's own bottom edge and the top
 // of the wedges below it - deliberately the same value on both sides of
 // the beat bar, so it doesn't read as closer to one than the other.
-const MOBILE_BEAT_BAR_GAP_PX = 26;
+const MOBILE_BEAT_BAR_GAP_PX = 30;
 // Mobile only: gap kept between the very bottom of the screen and the
 // wedges' own lowest point (their target-indicator circle - see Renderer's
 // WEDGE_TARGET_RADIUS_INSET/computeMobileWedgeGeometry - not their vertex).
 const MOBILE_WEDGE_BOTTOM_MARGIN_PX = 14;
 // Mobile only: room reserved at the very top of the screen, above the
 // juggling area, for #game-stats' streak/best (or competitive score)
-// readout - it's positioned independently in CSS/HTML, not measured live
-// here, so this just needs to comfortably clear it.
-const MOBILE_TOP_HUD_RESERVE_PX = 70;
+// readout - pinned near the top on mobile (see mobile.less), so this just
+// needs to comfortably clear that row.
+const MOBILE_TOP_HUD_RESERVE_PX = 52;
 
 // Match JugglingSimulator.resolveLandings - beat times and endTimes can differ
 // by a floating-point hair even when they represent the same instant.
@@ -113,7 +114,7 @@ const GROOVE_COUNTDOWN_SCHEDULE_BEATS = [10, 5];
  */
 export default class Game {
     constructor(siteswap, {
-        bpm, renderer, $beatBar, $beatBarWrap, $streakValue, $maxStreakValue, soundtrack, settings,
+        bpm, renderer, $beatBar, $beatBarWrap, $bpmControl, $streakValue, $maxStreakValue, soundtrack, settings,
         // Competitive mode (easier/normal/harder - as opposed to practice,
         // the only mode before this - see App.DIFFICULTY_CONFIG) swaps the
         // streak/best HUD for a single score stat, ramps BPM on its own
@@ -133,6 +134,11 @@ export default class Game {
         this.renderer = renderer;
         this.$beatBar = $beatBar;
         this.$beatBarWrap = $beatBarWrap;
+        // Practice-only (see body.mode-competitive in index.less, which
+        // hides it outright) - still positioned unconditionally by
+        // updateMobileLayout below regardless of mode, since that's just
+        // harmless inline CSS on a hidden element in competitive's case.
+        this.$bpmControl = $bpmControl;
         this.$streakValue = $streakValue;
         this.$maxStreakValue = $maxStreakValue;
         this.isCompetitive = mode === 'competitive';
@@ -251,6 +257,26 @@ export default class Game {
             onThrowStart: (intent) => this.handleThrowStart(intent),
             onThrowRelease: (intent) => this.handleThrowRelease(intent),
         })];
+        // Touch is additive, not a replacement - a mobile device with a
+        // paired keyboard (or just testing in devtools) keeps both working
+        // side by side, same as how 'hold'/'tap' already coexist for two
+        // different keys. Only attached on mobile at all since the wedges
+        // it hit-tests against (this.mobileWedgeLayout) are null on
+        // desktop (see updateMobileLayout) - a touchscreen laptop with a
+        // desktop-sized layout gets no wedge touch handling, same as it
+        // gets no wedge-below-beat-bar layout either.
+        if (isMobileViewport()) {
+            this.inputSchemes.push(new TouchInput(this.renderer.canvas, {
+                hitTest: (clientX, clientY) => this.hitTestWedgeTouch(clientX, clientY),
+                isDragMode: () => this.isDragMode(),
+                onThrowStart: (intent) => this.handleThrowStart(intent),
+                onThrowRelease: (intent) => this.handleThrowRelease(intent),
+                onDragStart: (hand) => this.handleDragStart(hand),
+                onDragUpdate: (hand, hit) => this.handleDragUpdate(hand, hit),
+                onDragRelease: (hand) => this.handleDragRelease(hand),
+                onDragCancel: (hand) => this.handleDragCancel(hand),
+            }));
+        }
 
         this.rafId = null;
     }
@@ -347,6 +373,14 @@ export default class Game {
         // Per-hand red danger hold when the throw key is down but no ball is
         // targeted - { crossing } or null (see handleThrowStart/Release).
         this.dangerHold = { L: null, R: null };
+        // Per-hand in-progress touch drag (mobile-only 'drag' inputType -
+        // see Settings.js/TouchInput) - { crossing, ring } or null. Kept
+        // separate from this.charging rather than reusing its shape, since
+        // a drag's side isn't fixed for its whole life the way a hold's is
+        // (see handleDragStart/handleDragUpdate/handleDragRelease) - ring 0
+        // (crossing null) means the finger hasn't left the ball yet, or has
+        // dragged back onto it/off the wedge since.
+        this.dragCharge = { L: null, R: null };
 
         // Competitive mode only - see the constructor's doc comment.
         // this.mistakeCount deliberately isn't reset by a mid-run recovery
@@ -499,6 +533,24 @@ export default class Game {
         return this.settings?.get('inputType') === 'tap';
     }
 
+    /** True when the player's inputType preference (see Settings.js) is 'drag' - mobile-only, see TouchInput/handleDragStart. */
+    isDragMode() {
+        return this.settings?.get('inputType') === 'drag';
+    }
+
+    /**
+     * Canvas-local hit test for a mobile wedge touch (see TouchInput) -
+     * converts the touch's page coordinates into the same canvas-relative
+     * CSS pixel space Renderer's own cx/cy live in (see Renderer.resize's
+     * getBoundingClientRect), then delegates to Renderer.hitTestMobileWedge
+     * with this Game's own live wedge layout/ring count.
+     */
+    hitTestWedgeTouch(clientX, clientY) {
+        const rect = this.renderer.canvas.getBoundingClientRect();
+        const ringCount = Math.max(this.crossHeights.length, this.selfHeights.length);
+        return this.renderer.hitTestMobileWedge(clientX - rect.left, clientY - rect.top, this.mobileWedgeLayout, ringCount);
+    }
+
     /**
      * Starts charging a throw for `hand` (hold mode), or advances its
      * cycle by one ring (tap mode - see handleTapThrow) - either way,
@@ -564,6 +616,72 @@ export default class Game {
             : 1;
         this.lockedThrow[hand] = { crossing, height: heights[litRings - 1], litRings };
         this.soundtrack.playChargeTick(litRings);
+        this.draw();
+    }
+
+    /**
+     * Touch-drag equivalent of handleThrowStart's press, for the
+     * mobile-only 'drag' inputType (see Settings.js/TouchInput) - arms
+     * hand's drag session only if there's currently a valid ball to throw
+     * (per computeTargetState), same as hold/tap would still let the
+     * player press through an empty hand to see the red danger flash.
+     * Touching an empty ball outline instead does nothing at all here -
+     * there's no side committed yet at this point (see handleDragUpdate)
+     * to flash red *for*. A fresh touch always supersedes any existing
+     * yellow lock, same "start over" rule handleThrowStart applies to its
+     * own charge.
+     */
+    handleDragStart(hand) {
+        if (!this.computeTargetState(hand).valid) return;
+        this.lockedThrow[hand] = null;
+        this.dragCharge[hand] = { crossing: null, ring: 0 };
+        this.draw();
+    }
+
+    /**
+     * Touch-drag equivalent of updateChargeTicks' rising per-ring tick, but
+     * driven directly by the finger's live radial position (see
+     * Renderer.hitTestMobileWedge/TouchInput) rather than elapsed hold
+     * time. Unlike a hold's charge (which only ever climbs), a drag can
+     * move to a *lower* ring just as easily as a higher one, so this plays
+     * one tick any time the ring actually changes, not just on the way up -
+     * playChargeTick's pitch is a pure function of the ring index itself,
+     * so it comes out right either direction without this needing to care
+     * which way the finger moved, just where it landed. `hit` is null once
+     * the finger drags back onto the ball or off the wedge entirely - shown
+     * identically to never having left the ball (ring 0, nothing lit, no
+     * tick), though the drag session itself stays alive underneath, ready
+     * to light back up if the finger comes back before release (see
+     * handleDragRelease).
+     */
+    handleDragUpdate(hand, hit) {
+        const drag = this.dragCharge[hand];
+        if (!drag) return;
+        const nextRing = hit ? hit.ring : 0;
+        if (nextRing > 0 && nextRing !== drag.ring) {
+            this.soundtrack.playChargeTick(nextRing);
+        }
+        drag.ring = nextRing;
+        drag.crossing = hit ? hit.crossing : null;
+        this.draw();
+    }
+
+    /** Releasing a drag locks in whatever ring/side it's currently over (yellow) - exactly like a hold's release - or does nothing if it never left the ball. */
+    handleDragRelease(hand) {
+        const drag = this.dragCharge[hand];
+        this.dragCharge[hand] = null;
+        if (!drag || drag.ring === 0 || drag.crossing == null) {
+            this.draw();
+            return;
+        }
+        const heights = drag.crossing ? this.crossHeights : this.selfHeights;
+        this.lockedThrow[hand] = { crossing: drag.crossing, height: heights[drag.ring - 1], litRings: drag.ring };
+        this.draw();
+    }
+
+    /** An interrupted drag (touchcancel) never locks in, unlike a normal release. */
+    handleDragCancel(hand) {
+        this.dragCharge[hand] = null;
         this.draw();
     }
 
@@ -679,11 +797,24 @@ export default class Game {
      * idle beats with no press at all aren't treated as misses - only a
      * throw that's actually attempted and fails (empty hand, expired hold,
      * or the wrong hand/crossing/height) breaks the ghost-highlight streak.
+     *
+     * A still-in-progress drag (mobile-only 'drag' inputType - see
+     * Settings.js/handleDragStart) that hasn't reached a ring yet (still on
+     * the ball, or dragged back onto it/off the wedge) is treated the same
+     * as no press at all here, not a fixed-fail danger hold - unlike
+     * hold/tap's press, arming a drag never commits to a side (see
+     * handleDragStart's doc), so there's nothing yet to hold against the
+     * player. One that *has* reached a ring fires (or fails) exactly like a
+     * hold that's still being held when the beat lands - "release to lock
+     * in" only matters for a drag that beats the clock; one that doesn't
+     * just resolves with whatever ring it's currently over instead.
      */
     resolveBeatThrow(hand) {
         const locked = this.lockedThrow[hand];
         const charge = this.charging[hand];
-        if (!locked && !charge) {
+        const drag = this.dragCharge[hand];
+        const activeDrag = drag && drag.ring > 0 && drag.crossing != null ? drag : null;
+        if (!locked && !charge && !activeDrag) {
             return;
         }
 
@@ -695,7 +826,7 @@ export default class Game {
         if (locked) {
             ({ crossing, height, litRings } = locked);
             fromLock = true;
-        } else {
+        } else if (charge) {
             const state = this.getChargeState(hand);
             const heights = charge.crossing ? this.crossHeights : this.selfHeights;
             crossing = charge.crossing;
@@ -713,6 +844,11 @@ export default class Game {
                 this.recordThrowSequenceOutcome(null, crossing, height);
                 return;
             }
+        } else {
+            const heights = activeDrag.crossing ? this.crossHeights : this.selfHeights;
+            crossing = activeDrag.crossing;
+            litRings = activeDrag.ring;
+            height = heights[litRings - 1];
         }
 
         const success = this.handHasThrowableBall(hand);
@@ -725,11 +861,15 @@ export default class Game {
 
         if (fromLock) {
             this.lockedThrow[hand] = null;
-        } else {
+        } else if (charge) {
             // Key may still be physically held - clearing charge ensures the
             // next beat won't fire again until a fresh press (see
             // KeyboardInput.keysHeld).
             this.charging[hand] = null;
+        } else {
+            // Finger may still be down - clearing the drag ensures the next
+            // beat won't fire again until a fresh touch (see TouchInput).
+            this.dragCharge[hand] = null;
         }
 
         if (success) {
@@ -1287,6 +1427,15 @@ export default class Game {
             };
         }
 
+        const drag = this.dragCharge[hand];
+        if (drag && drag.ring > 0 && drag.crossing != null) {
+            return {
+                ...base,
+                activeSide: drag.crossing ? 'cross' : 'self',
+                litRings: drag.ring,
+            };
+        }
+
         const charge = this.charging[hand];
         if (charge) {
             const state = this.getChargeState(hand);
@@ -1337,13 +1486,20 @@ export default class Game {
      * comment), rather than the beat bar being closer to one side than the
      * other.
      *
-     * No-ops the mobile-only bits (and clears any inline beat-bar
-     * position, so mobile.less' own default layout applies) on desktop.
+     * Also re-centers #bpm-control (practice mode's BPM slider) on the
+     * juggling band vertically, rather than the full screen height its own
+     * CSS centers it on by default - same reasoning as screenCenterY below,
+     * just for a fixed-position DOM element instead of the canvas.
+     *
+     * No-ops the mobile-only bits (and clears any inline beat-bar/
+     * bpm-control position, so their own default CSS layout applies) on
+     * desktop.
      */
     updateMobileLayout() {
         if (!isMobileViewport()) {
             this.renderer.fit(this.extent);
             this.$beatBarWrap.css({ top: '', bottom: '' });
+            this.$bpmControl.css({ top: '', transform: '' });
             this.mobileWedgeLayout = null;
             return;
         }
@@ -1383,6 +1539,11 @@ export default class Game {
         const bandBottom = this.renderer.cssHeight - reservedBottomPx;
         const { scale, centerY } = this.renderer.camera;
         this.renderer.camera.screenCenterY = bandBottom + scale * (this.physics.handY - centerY - this.ballRadius);
+
+        this.$bpmControl.css({
+            top: `${(MOBILE_TOP_HUD_RESERVE_PX + bandBottom) / 2}px`,
+            transform: 'translateY(-50%)',
+        });
 
         // Exactly bandBottom by construction (see screenCenterY above) -
         // spelled out via worldToScreen anyway, rather than just using

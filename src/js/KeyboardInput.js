@@ -18,7 +18,9 @@ export function formatKeycapLabel(key) {
 export function buildControlsModalData(bindings = DEFAULT_KEY_BINDINGS, { inputType = 'hold' } = {}) {
     const heightControlPhrase = inputType === 'tap'
         ? 'tap the key repeatedly'
-        : 'hold the key down longer';
+        : inputType === 'drag'
+            ? 'drag further up the wedge before letting go'
+            : 'hold the key down longer';
 
     return {
         leftSelf: formatKeycapLabel(bindings.L.self),

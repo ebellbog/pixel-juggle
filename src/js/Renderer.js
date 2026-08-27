@@ -287,14 +287,13 @@ export default class Renderer {
      * it, sized around their own actual footprint rather than a fixed
      * fraction of the screen) - so the juggling area gets to use whatever
      * room neither needs. The resulting `scale` fits the whole extent into
-     * that band without clipping either edge regardless of exactly where
-     * *within* the band it ends up placed - Game overrides screenCenterY's
-     * default (centered in the band, i.e. equal slack top and bottom) right
-     * after calling this, to bottom-anchor the pattern's real lowest visual
-     * point flush against the band's bottom edge instead (see
-     * updateMobileLayout's own doc for why). The demo ("Visualize") has
-     * none of that HUD, so its own fit() calls (see App.js) leave this off
-     * and get the full screen on mobile too, same as desktop always has.
+     * that band without clipping either edge, centered within the band by
+     * default (screenCenterY below) - the same centering the demo
+     * ("Visualize") mode gets from its own, unreserved fit() calls (see
+     * App.js) across the full screen, since it has none of that HUD to
+     * make room for. Game reads the band back out afterward (see
+     * updateMobileLayout) to plant the beat bar/wedges/#bpm-control
+     * relative to wherever this ends up centering the pattern.
      */
     fit(extent, { reserveMobileControls = false, reservedTopPx = 0, reservedBottomPx = 0 } = {}) {
         const worldWidth = Math.max(extent.maxX - extent.minX, 1e-6);
@@ -316,8 +315,8 @@ export default class Renderer {
             scale: Math.min(usableWidth / worldWidth, usableHeight / worldHeight),
             centerX: (extent.minX + extent.maxX) / 2,
             centerY: (extent.minY + extent.maxY) / 2,
-            // Vertically centered within the band by default - see this
-            // method's own doc for why/when Game overrides it afterward.
+            // Vertically centered within the band - see this method's own
+            // doc for how Game uses that afterward.
             screenCenterY: bandTop + bandHeight / 2,
         };
         this.extent = extent;

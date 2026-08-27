@@ -1471,25 +1471,28 @@ export default class Game {
      * room fit() should reserve at the bottom of the screen depends on the
      * wedges' own footprint (so the juggling area gets to use whatever
      * room they don't need - see Renderer.fit's `reservedBottomPx`), but
-     * exactly where the beat bar (and, in turn, the wedges below it) ends
-     * up vertically depends on where fit() puts the pattern's own bottom
-     * edge. So: first ask Renderer for the wedges' width-driven scale/
-     * footprint alone (pure geometry, independent of any particular fit -
-     * see computeMobileWedgeGeometry), use that to size fit()'s
-     * reservation, *then* - now that fit() has picked a scale - explicitly
-     * override where it put the pattern vertically (see screenCenterY
-     * below) so its own actual bottom edge (a ball at rest in a hand)
-     * lands exactly on the reserved band's bottom edge, before finally
-     * planting the beat bar MOBILE_BEAT_BAR_GAP_PX below *that*, and the
-     * wedges' vertex that same gap below the beat bar - the same gap on
-     * both sides of the beat bar is the whole point (see its own doc
-     * comment), rather than the beat bar being closer to one side than the
-     * other.
+     * exactly where the beat bar ends up vertically depends on where fit()
+     * puts the pattern's own bottom edge. So: first ask Renderer for the
+     * wedges' width-driven scale/footprint alone (pure geometry,
+     * independent of any particular fit - see computeMobileWedgeGeometry),
+     * use that to size fit()'s reservation, then let fit() place the
+     * pattern - centered within that reserved band, same as it (and the
+     * demo/"Visualize" mode, which reserves no band at all) always centers
+     * within whatever space it's given - before finally planting the beat
+     * bar MOBILE_BEAT_BAR_GAP_PX below the pattern's own actual bottom edge
+     * (a ball at rest in a hand). The wedges, unlike the beat bar, anchor
+     * to the *screen's* bottom edge instead of tracking the pattern/beat
+     * bar - see wedgeVertexY below - so centering (rather than
+     * bottom-anchoring) the pattern only ever widens the gap between the
+     * beat bar and the wedges beyond MOBILE_BEAT_BAR_GAP_PX (when the
+     * pattern doesn't need the band's full height), never shrinks it below
+     * that minimum.
      *
      * Also re-centers #bpm-control (practice mode's BPM slider) on the
      * juggling band vertically, rather than the full screen height its own
-     * CSS centers it on by default - same reasoning as screenCenterY below,
-     * just for a fixed-position DOM element instead of the canvas.
+     * CSS centers it on by default - same band fit() just centered the
+     * pattern within, just for a fixed-position DOM element instead of the
+     * canvas.
      *
      * No-ops the mobile-only bits (and clears any inline beat-bar/
      * bpm-control position, so their own default CSS layout applies) on
@@ -1520,41 +1523,36 @@ export default class Game {
             reservedBottomPx,
         });
 
-        // fit() picks a scale that's guaranteed to fit the whole extent
-        // (including e.g. the peak of the tallest throw) within the
-        // reserved band without clipping, but - by default - centers it
-        // within that band, splitting any leftover slack evenly above and
-        // below. On a pattern that doesn't need the band's full height
-        // (most of them, since scale is very often width-, not
-        // height-, bound on a narrow phone screen), that put unused space
-        // right where it's most visible: between the pattern and the beat
-        // bar below it, exactly undoing reservedBottomPx's whole point.
-        // Re-deriving screenCenterY (solving worldToScreen(handY).y +
-        // ballRadius*scale === bandBottom for screenCenterY) instead
-        // bottom-anchors the pattern's real lowest visual point flush
-        // against the band's bottom edge, pushing all of that leftover
-        // slack up above the pattern instead - which, conveniently, is
-        // exactly where MOBILE_TOP_HUD_RESERVE_PX already wants some
-        // breathing room for #game-stats anyway.
+        // fit() already centered the pattern within the reserved band
+        // (bandTop..bandBottom - see its own doc), the same way it centers
+        // within the full screen for the demo/"Visualize" mode's
+        // un-reserved fit() calls - so #bpm-control just needs that same
+        // band, re-derived here since fit() doesn't hand it back.
         const bandBottom = this.renderer.cssHeight - reservedBottomPx;
-        const { scale, centerY } = this.renderer.camera;
-        this.renderer.camera.screenCenterY = bandBottom + scale * (this.physics.handY - centerY - this.ballRadius);
-
         this.$bpmControl.css({
             top: `${(MOBILE_TOP_HUD_RESERVE_PX + bandBottom) / 2}px`,
             transform: 'translateY(-50%)',
         });
 
-        // Exactly bandBottom by construction (see screenCenterY above) -
-        // spelled out via worldToScreen anyway, rather than just using
-        // bandBottom directly, so this reads the same way positionMobile-
-        // BeatBar's very first version did, and stays correct even if the
-        // anchor formula above ever changes.
+        // The pattern's real lowest visual point (a ball at rest in a
+        // hand), not the band's own edge - centering (see above) leaves
+        // slack between the two whenever the pattern doesn't need the
+        // band's full height, and the beat bar should track the pattern's
+        // actual edge rather than that slack.
+        const { scale } = this.renderer.camera;
         const patternBottomY = this.renderer.worldToScreen(0, this.physics.handY).y + this.ballRadius * scale;
         const beatBarTop = patternBottomY + MOBILE_BEAT_BAR_GAP_PX;
         this.$beatBarWrap.css({ top: `${beatBarTop}px`, bottom: 'auto' });
 
-        const wedgeVertexY = beatBarTop + beatBarHeight + MOBILE_BEAT_BAR_GAP_PX + wedgeGeometry.aboveVertex;
+        // Unlike the beat bar above, the wedges anchor to the *screen's*
+        // bottom edge (MOBILE_WEDGE_BOTTOM_MARGIN_PX up from it) rather
+        // than tracking wherever the (now-centered) pattern/beat bar ended
+        // up - reservedBottomPx already reserves exactly enough room above
+        // this point for the beat bar plus both of its gaps, so anchoring
+        // here can only ever widen the beat bar/wedge gap beyond
+        // MOBILE_BEAT_BAR_GAP_PX (when the pattern doesn't need the band's
+        // full height), never shrink it below that minimum.
+        const wedgeVertexY = this.renderer.cssHeight - MOBILE_WEDGE_BOTTOM_MARGIN_PX - wedgeGeometry.belowVertex;
         this.mobileWedgeLayout = {
             leftCx: wedgeGeometry.leftCx,
             rightCx: wedgeGeometry.rightCx,
